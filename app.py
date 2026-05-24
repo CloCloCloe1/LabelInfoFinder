@@ -76,9 +76,11 @@ TRUSTED_DOMAINS = [
 
 KNOWN_ONLINE_PRODUCTS = {
     "1129343972": {
-        "source_url": "https://www.intoyoucosmetics.com/en-ca/products/into-you-glow-lipstick\nhttps://www.yesstyle.com/en/into-you-glowing-lipstick-8-colors-gl08-red-brown-3g/info.html/pid.1129343972\nhttps://www.uniquebunny.com/products/into-you-glow-lipstick",
+        "source_url": "https://www.asianbeautywholesale.com/en/into-you-glowing-lipstick-8-colors-gl08-red-brown-3g/info.html/pid.1129343972\nhttps://www.intoyoucosmetics.com/en-ca/products/into-you-glow-lipstick\nhttps://www.yesstyle.com/en/into-you-glowing-lipstick-8-colors-gl08-red-brown-3g/info.html/pid.1129343972\nhttps://www.uniquebunny.com/products/into-you-glow-lipstick\nhttps://www.intoyoucosmetics.com/en-ca/pages/about-us",
         "net weight": "Net. 3 g",
         "source_direction": "Apply a small amount directly to lips. Store below 25°C and refrigerate if the product softens.",
+        "ingredients": "Isostearyl Isostearate, Polyglyceryl-2 Triisostearate, Diisostearyl Malate, Sorbitan Isostearate, Paraffin, Trimethylpentaphenyl Trisiloxane, Microcrystalline Wax, Pentaerythrityl Isostearate, Euphorbia Cerifera (Candelilla) Wax, 1,2-Hexanediol, PEG/PPG-10/1 Dimethicone, CI 77891, CI 19140, CI 45410, CI 77491, Fragrance, CI 77499, Pentaerythrityl Tetraisostearate",
+        "manufacturer": "HONGKONG LETS INTERNATIONAL TRADING LIMITED",
     },
     "1126245093": {
         "source_url": "https://www.intoyoucosmetics.com/en-gb/products/airy-lip-cheek-mud\nhttps://www.uniquebunny.com/products/into-you-airy-lip-cheek-mud\nhttps://www.yesstyle.com/en/into-you-airy-lip-cheek-mud-5-colors-c1-c5-c5-mauve-taupe-1-8g/info.html/pid.1126244966",
@@ -404,17 +406,46 @@ def domain_from_url(url: str) -> str:
 
 
 def ingredients_from_text(text: str) -> str | None:
-    match = re.search(
-        r"(ingredients?|inci)\s*[:：]\s*(.{40,1200}?)(?:directions?|how to use|caution|warning|made in|$)",
-        text,
-        flags=re.I,
-    )
-    if not match:
+    patterns = [
+        r"major\s+ingredients?\s*[:：]?\s*(.{40,2000}?)(?:more|ingredients subject|product information|details|catalog|how to use|$)",
+        r"(?:ingredients?|inci)\s*[:：]\s*(.{40,2000}?)(?:directions?|how to use|caution|warning|made in|product information|catalog|$)",
+    ]
+    ingredients = ""
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.I)
+        if match:
+            ingredients = match.group(1).strip(" .;")
+            break
+    if not ingredients:
         return None
-    ingredients = match.group(2).strip(" .;")
+    ingredients = re.sub(r"\b(GL|C|W|N|VT)\d{1,3}\b\s*", "", ingredients)
+    ingredients = re.sub(r"\s*<br\s*/?>\s*", ", ", ingredients, flags=re.I)
+    ingredients = re.sub(r"\s+", " ", ingredients).strip(" .;")
     if len(ingredients) < 40 or "," not in ingredients:
         return None
     return f"INGREDIENTS/INGRÉDIENTS: {ingredients} / need to review"
+
+
+def ingredients_label(ingredients: str | None) -> str:
+    if not ingredients:
+        return "need to review"
+    clean = ingredients.strip(" .;")
+    return f"INGREDIENTS/INGRÉDIENTS: {clean} / need to review"
+
+
+def manufacturer_from_text(text: str) -> str | None:
+    patterns = [
+        r"manufacturer\s*[:：]\s*(.{3,120}?)(?:address|country|made in|$)",
+        r"company\s+name\s*[:：]\s*(.{3,120}?)(?:country|address|business|$)",
+        r"name\s+of\s+business/corporation\s*[:：]\s*(.{3,120}?)(?:address|$)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.I)
+        if match:
+            value = re.sub(r"\s+", " ", match.group(1)).strip(" .;")
+            if len(value) > 3:
+                return value
+    return None
 
 
 def how_to_use_from_text(text: str) -> str | None:
@@ -660,8 +691,12 @@ def process_row(
     values["mode d’emploi"] = direction_fr
     values["cautions"] = caution_en
     values["mises en garde:"] = caution_fr
-    values["manufacturer"] = "need to review"
-    values["ingredients/ingrédients"] = ingredients_from_text(combined_text) or "need to review"
+    values["manufacturer"] = manufacturer_from_text(combined_text) or known.get("manufacturer") or "need to review"
+    values["ingredients/ingrédients"] = (
+        ingredients_from_text(combined_text)
+        or ingredients_label(known.get("ingredients"))
+        or "need to review"
+    )
     values["coo"] = coo_from_text(combined_text + " " + product) or known.get("coo") or "need to review"
     values["distributed by / distribué par:"] = DISTRIBUTOR
 
