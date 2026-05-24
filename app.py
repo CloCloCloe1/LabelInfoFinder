@@ -316,11 +316,29 @@ def source_rank(url: str) -> int:
 
 @st.cache_data(ttl=60 * 60 * 24)
 def fetch_text(url: str) -> str:
+    text = fetch_direct_text(url)
+    if len(text) > 200:
+        return text
+    text = fetch_shopify_product_text(url)
+    if len(text) > 200:
+        return text
+    text = fetch_jina_text(url)
+    if len(text) > 200:
+        return text
+    return ""
+
+
+def fetch_direct_text(url: str) -> str:
     try:
         response = requests.get(
             url,
             timeout=15,
-            headers={"User-Agent": "Mozilla/5.0 label-research-tool/1.0"},
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9,fr;q=0.8,zh-CN;q=0.7,ja;q=0.6,ko;q=0.6",
+            },
         )
         response.raise_for_status()
     except requests.RequestException:
@@ -328,6 +346,54 @@ def fetch_text(url: str) -> str:
     text = re.sub(r"<script.*?</script>|<style.*?</style>", " ", response.text, flags=re.S | re.I)
     text = re.sub(r"<[^>]+>", " ", text)
     return html.unescape(re.sub(r"\s+", " ", text)).strip()
+
+
+def fetch_jina_text(url: str) -> str:
+    try:
+        response = requests.get(
+            f"https://r.jina.ai/{url}",
+            timeout=25,
+            headers={
+                "User-Agent": "Mozilla/5.0 label-research-tool/1.0",
+                "Accept": "text/plain, text/markdown, */*",
+            },
+        )
+        response.raise_for_status()
+    except requests.RequestException:
+        return ""
+    return html.unescape(re.sub(r"\s+", " ", response.text)).strip()
+
+
+def fetch_shopify_product_text(url: str) -> str:
+    parsed = urlparse(url)
+    if "/products/" not in parsed.path:
+        return ""
+    handle = parsed.path.split("/products/", 1)[1].strip("/").split("/", 1)[0]
+    if not handle:
+        return ""
+    product_json_url = f"{parsed.scheme}://{parsed.netloc}/products/{handle}.js"
+    try:
+        response = requests.get(
+            product_json_url,
+            timeout=15,
+            headers={
+                "User-Agent": "Mozilla/5.0 label-research-tool/1.0",
+                "Accept": "application/json,text/plain,*/*",
+            },
+        )
+        response.raise_for_status()
+        data = response.json()
+    except (requests.RequestException, ValueError):
+        return ""
+    pieces = [
+        str(data.get("title", "")),
+        str(data.get("vendor", "")),
+        re.sub(r"<[^>]+>", " ", str(data.get("description", ""))),
+    ]
+    for variant in data.get("variants", []) or []:
+        pieces.append(str(variant.get("title", "")))
+        pieces.append(str(variant.get("sku", "")))
+    return html.unescape(re.sub(r"\s+", " ", " ".join(pieces))).strip()
 
 
 @st.cache_data(ttl=60 * 60 * 24)
@@ -432,32 +498,91 @@ def domain_from_url(url: str) -> str:
 
 
 def ingredients_from_text(text: str) -> str | None:
-    patterns = [
-        r"major\s+ingredients?\s*[:：]?\s*(.{40,2000}?)(?:more|ingredients subject|product information|details|catalog|how to use|$)",
-        r"(?:ingredients?|ingrédients?|inci)\s*[:：]?\s*(.{40,2000}?)(?:directions?|mode d’emploi|how to use|caution|warning|made in|product information|catalog|$)",
-    ]
-    ingredients = ""
-    for pattern in patterns:
-        match = re.search(pattern, text, flags=re.I)
-        if match:
-            ingredients = match.group(1).strip(" .;")
-            break
-    if not ingredients:
+    if not text:
         return None
-    ingredients = normalize_ingredients_text(ingredients)
-    if len(ingredients) < 40 or "," not in ingredients:
+    stop_words = (
+        r"\bmore\b|more information|ingredients subject|shipping policy|policies|"
+        r"product information|product details|details\s*/|"
+        r"how to use|directions?|mode d’emploi|caution|warning|made in|catalog|sku|size"
+    )
+    patterns = [
+        rf"major\s+ingredients?\s*[:：]?\s*(.{{40,9000}}?)(?={stop_words}|$)",
+        rf"(?:ingredients?|ingr[eé]dients?)\s*[:：]?\s*(.{{40,9000}}?)(?={stop_words}|$)",
+    ]
+    candidates: list[str] = []
+    for pattern in patterns:
+        for match in re.finditer(pattern, text, flags=re.I):
+            candidate = normalize_ingredients_text(match.group(1))
+            if len(candidate) >= 40 and "," in candidate:
+                candidates.append(candidate)
+    candidates = [
+        candidate
+        for candidate in candidates
+        if "manufacturer's discretion" not in candidate.lower()
+        and "refer to product packaging" not in candidate.lower()
+        and "subject to change" not in candidate.lower()
+        and "{{" not in candidate
+        and "productdata." not in candidate.lower()
+        and "customer reviews" not in candidate.lower()
+    ]
+    if not candidates:
+        return None
+    ingredients = max(candidates, key=ingredient_candidate_score)
+    if ingredient_candidate_score(ingredients) < 4:
         return None
     return ingredients_label(ingredients)
 
 
+def ingredient_candidate_score(ingredients: str) -> int:
+    low = ingredients.lower()
+    inci_hits = [
+        "ci ",
+        "dimethicone",
+        "isostearate",
+        "talc",
+        "mica",
+        "silica",
+        "wax",
+        "oil",
+        "aqua",
+        "glyceryl",
+        "polyglyceryl",
+        "cyclopentasiloxane",
+        "hexanediol",
+    ]
+    return sum(low.count(hit) for hit in inci_hits) + ingredients.count(",")
+
+
 def normalize_ingredients_text(ingredients: str) -> str:
+    ingredients = re.sub(r"\bFormula\s+\d+\s*:\s*", ", ", ingredients, flags=re.I)
     ingredients = re.sub(r"\b(GL|PG|VT)\d{1,3}\b\s*", "", ingredients)
     ingredients = re.sub(r"(?<![A-Za-z])(?:C|W|N)\d{1,3}(?![-\w])\s*", "", ingredients)
     ingredients = re.sub(r"\s*<br\s*/?>\s*", ", ", ingredients, flags=re.I)
+    ingredients = re.sub(r"\s*,\s*", ", ", ingredients)
     ingredients = re.sub(r"\s+", " ", ingredients).strip(" .;")
     ingredients = re.sub(r"\bwater\b", "Aqua", ingredients, flags=re.I)
     ingredients = re.sub(r"\bINCI\b\s*$", "", ingredients).strip(" .;,")
+    ingredients = dedupe_adjacent_ingredients(ingredients)
     return ingredients
+
+
+def dedupe_adjacent_ingredients(ingredients: str) -> str:
+    parts = split_ingredients(ingredients)
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for part in parts:
+        key = ingredient_dedupe_key(part)
+        if key and key not in seen:
+            cleaned.append(part.strip())
+            seen.add(key)
+    return ", ".join(cleaned)
+
+
+def ingredient_dedupe_key(ingredient: str) -> str:
+    key = re.sub(r"\s+", " ", ingredient).strip().lower()
+    key = key.replace("ci ", "ci")
+    key = re.sub(r"[^a-z0-9]+", "", key)
+    return key
 
 
 def ingredients_label(ingredients: str | None) -> str:
@@ -571,7 +696,7 @@ def translate_ingredients(ingredients: str, mapping: dict[str, str]) -> str:
 
 
 def split_ingredients(ingredients: str) -> list[str]:
-    protected = re.sub(r"(\d),(\d)", r"\1<COMMA>\2", ingredients)
+    protected = re.sub(r"(\d),\s*(\d)", r"\1<COMMA>\2", ingredients)
     parts = [part.replace("<COMMA>", ",").strip() for part in protected.split(",")]
     return [part for part in parts if part]
 
