@@ -1,4 +1,5 @@
 import copy
+import difflib
 import hashlib
 import html
 import json
@@ -72,6 +73,19 @@ TRUSTED_DOMAINS = [
     "uniquebunny.com",
     "oliveyoung.com",
     "stylevana.com",
+]
+
+SEARCH_LANGUAGE_HINTS = [
+    "",
+    "English",
+    "official",
+    "ingredients",
+    "net weight",
+    "how to use",
+    "成分",
+    "容量",
+    "使い方",
+    "성분",
 ]
 
 KNOWN_ONLINE_PRODUCTS = {
@@ -285,6 +299,10 @@ def source_rank(url: str) -> int:
     for idx, trusted in enumerate(TRUSTED_DOMAINS):
         if trusted in domain:
             return idx
+    if any(market in domain for market in ["amazon.", "ebay.", "temu.", "aliexpress."]):
+        return 180
+    if any(noisy in domain for noisy in ["baidu.", "wikipedia.", "reddit."]):
+        return 220
     return 100
 
 
@@ -483,6 +501,88 @@ def normalize_product_name(product: str) -> str:
     return re.sub(r"\s+", " ", str(product).replace("\xa0", " ")).strip()
 
 
+def searchable_text(value: str) -> str:
+    text = normalize_product_name(value).lower()
+    text = re.sub(r"[\-_()/|]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def search_tokens(product: str) -> list[str]:
+    stopwords = {"the", "and", "for", "with", "colors", "color", "set", "pcs", "pc"}
+    tokens = re.findall(r"[\w\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]+", searchable_text(product))
+    return [token for token in tokens if len(token) > 1 and token not in stopwords]
+
+
+def product_brand(product: str) -> str:
+    tokens = search_tokens(product)
+    if not tokens:
+        return ""
+    if len(tokens) >= 2 and tokens[0] in {"into", "fwee"}:
+        return " ".join(tokens[:2]) if tokens[0] == "into" else tokens[0]
+    return " ".join(tokens[:2])
+
+
+def fuzzy_queries(barcode: str, product: str) -> list[str]:
+    clean_product = normalize_product_name(product)
+    tokens = search_tokens(clean_product)
+    brand = product_brand(clean_product)
+    core = " ".join(tokens[:6])
+    tail = " ".join(tokens[-5:])
+    queries = [
+        f"{barcode} {clean_product}",
+        f"{barcode} ingredients net weight",
+        f"\"{barcode}\"",
+        f"{clean_product} ingredients net weight",
+        f"{clean_product} how to use ingredients",
+        f"{brand} {tail} ingredients" if brand and tail else "",
+        f"{core} site:yesstyle.com",
+        f"{core} site:asianbeautywholesale.com",
+        f"{core} site:official",
+    ]
+    if re.search(r"[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]", clean_product):
+        queries.extend(
+            [
+                f"{clean_product} ingredients English",
+                f"{clean_product} 成分 容量",
+                f"{clean_product} 全成分 容量",
+                f"{clean_product} 전성분 용량",
+            ]
+        )
+    for hint in SEARCH_LANGUAGE_HINTS:
+        if brand and hint:
+            queries.append(f"{brand} {hint} {tail}".strip())
+    deduped: list[str] = []
+    seen = set()
+    for query in queries:
+        query = re.sub(r"\s+", " ", query).strip()
+        if query and query not in seen:
+            seen.add(query)
+            deduped.append(query)
+    return deduped[:14]
+
+
+def fuzzy_source_score(url: str, title_or_text: str, barcode: str, product: str) -> float:
+    haystack = searchable_text(f"{url} {title_or_text}")
+    tokens = search_tokens(product)
+    score = 0.0
+    if barcode and barcode in haystack:
+        score += 8
+    domain_rank = source_rank(url)
+    if domain_rank < 100:
+        score += 6 - min(domain_rank, 5) * 0.5
+    for token in tokens:
+        if token in haystack:
+            score += 1
+    if "ingredients" in haystack or "major ingredients" in haystack:
+        score += 2
+    if "net weight" in haystack or re.search(r"\b\d+(?:\.\d+)?\s*(g|ml)\b", haystack):
+        score += 1.5
+    product_norm = searchable_text(product)
+    if product_norm and haystack:
+        score += difflib.SequenceMatcher(None, product_norm[:120], haystack[:240]).ratio() * 4
+    return score
+
+
 def direction_for_product(product: str, source_direction: str | None) -> tuple[str, str]:
     low = product.lower()
     if "lip" in low and "cheek" in low:
@@ -614,22 +714,25 @@ def candidate_urls(barcode: str, product: str) -> list[str]:
     if "into" in clean_product.lower() and "airy" in clean_product.lower() and "lip" in clean_product.lower():
         candidates.append("https://www.intoyoucosmetics.com/en-ca/products/airy-lip-mud")
 
-    queries = [
-        f"{barcode} {clean_product} ingredients net weight",
-        f"{clean_product} ingredients net weight site:yesstyle.com OR site:asianbeautywholesale.com OR site:intoyoucosmetics.com",
-    ]
-    for query in queries:
+    scored: list[tuple[float, str]] = []
+    for url in candidates:
+        scored.append((fuzzy_source_score(url, url, barcode, clean_product), url))
+
+    for query in fuzzy_queries(barcode, clean_product):
         for result in search_web(query):
-            candidates.append(result["url"])
+            url = result["url"]
+            score = fuzzy_source_score(url, result.get("title", ""), barcode, clean_product)
+            if score >= 4:
+                scored.append((score, url))
 
     deduped: list[str] = []
     seen = set()
-    for url in sorted(candidates, key=source_rank):
+    for _score, url in sorted(scored, key=lambda item: (-item[0], source_rank(item[1]))):
         if not url or url in seen:
             continue
         seen.add(url)
         deduped.append(url)
-    return deduped[:8]
+    return deduped[:10]
 
 
 def process_row(
