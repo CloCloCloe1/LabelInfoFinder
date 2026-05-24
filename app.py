@@ -22,6 +22,7 @@ APP_DIR = Path(__file__).resolve().parent
 DATA_DIR = APP_DIR / "data"
 EXPORT_DIR = APP_DIR / "outputs"
 DB_PATH = DATA_DIR / "users.sqlite3"
+BUILTIN_REFERENCE_PATH = APP_DIR / "reference_data.json"
 
 SITE_NAME = "Lebal Info Finder"
 
@@ -50,6 +51,18 @@ HOTLIST_URL = (
     "cosmetics/cosmetic-ingredient-hotlist-prohibited-restricted-ingredients/"
     "hotlist.html"
 )
+
+REQUIRED_LABEL_FIELDS = [
+    "product name french",
+    "net weight",
+    "direction for use",
+    "mode d’emploi",
+    "cautions",
+    "mises en garde:",
+    "ingredients/ingrédients",
+    "distributed by / distribué par:",
+    "coo",
+]
 
 
 def ensure_dirs() -> None:
@@ -243,6 +256,13 @@ def hotlist_text() -> str:
     return fetch_text(HOTLIST_URL)
 
 
+@st.cache_data
+def builtin_reference_data() -> dict[str, dict[str, str]]:
+    if not BUILTIN_REFERENCE_PATH.exists():
+        return {}
+    return json.loads(BUILTIN_REFERENCE_PATH.read_text(encoding="utf-8"))
+
+
 def normalized_headers(ws: openpyxl.worksheet.worksheet.Worksheet) -> dict[str, int]:
     headers = {}
     for cell in ws[1]:
@@ -370,6 +390,19 @@ def fill_from_reference(
     return None
 
 
+def fill_from_builtin_reference(barcode: str) -> dict[str, str] | None:
+    return builtin_reference_data().get(str(barcode).strip().replace(".0", ""))
+
+
+def missing_required_fields(values: dict[str, str]) -> list[str]:
+    missing = []
+    for field in REQUIRED_LABEL_FIELDS:
+        value = values.get(field)
+        if value in (None, "", "need to review"):
+            missing.append(field)
+    return missing
+
+
 def process_row(
     row: dict[str, Any],
     reference_values: dict[str, str] | None,
@@ -383,8 +416,12 @@ def process_row(
 
     if reference_values:
         values.update(reference_values)
-        notes.append("Matched completed reference sheet by barcode.")
-        return FillResult(values, "Completed", "Workbook Sheet1", " ".join(notes))
+        notes.append("Matched reference data by barcode.")
+        missing = missing_required_fields(values)
+        status = "Completed" if not missing else "Need to review"
+        if missing:
+            notes.append("Missing required fields: " + ", ".join(missing) + ".")
+        return FillResult(values, status, "Reference data", " ".join(notes))
 
     query = barcode if barcode else product
     results = search_web(f"{query} ingredients net weight origin")
@@ -496,7 +533,11 @@ def process_workbook(
         barcode = str(fill_ws.cell(row_idx, barcode_col).value or "").strip().replace(".0", "")
         product = str(fill_ws.cell(row_idx, product_col).value or "") if product_col else ""
         row = {"barcode": barcode, "product name": product}
-        reference_values = fill_from_reference(ref_ws, ref_headers, barcode)
+        reference_values = None
+        if reference_sheet != fill_sheet:
+            reference_values = fill_from_reference(ref_ws, ref_headers, barcode)
+        if not reference_values or missing_required_fields(reference_values):
+            reference_values = fill_from_builtin_reference(barcode) or reference_values
         result = process_row(row, reference_values, use_defaults)
 
         for header, value in result.values.items():
@@ -566,6 +607,11 @@ def main_app() -> None:
     col1, col2 = st.columns(2)
     reference_sheet = col1.selectbox("Completed reference sheet", names, index=names.index("Sheet1") if "Sheet1" in names else 0)
     fill_sheet = col2.selectbox("Sheet to fill", names, index=names.index("Sheet2") if "Sheet2" in names else min(1, len(names) - 1))
+    if reference_sheet == fill_sheet:
+        st.warning(
+            "The same sheet is selected for reference and filling. Workbook reference matching will be skipped, "
+            "and the app will use the built-in reference database plus online search."
+        )
 
     with st.expander("Preview completed reference", expanded=False):
         st.dataframe(dataframe_from_sheet(wb[reference_sheet]), use_container_width=True)
