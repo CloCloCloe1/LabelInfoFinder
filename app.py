@@ -511,15 +511,12 @@ def export_workbook(wb: openpyxl.Workbook, name: str) -> Path:
 
 def process_workbook(
     path: Path,
-    reference_sheet: str,
     fill_sheet: str,
     use_defaults: bool,
     limit: int | None = None,
 ) -> tuple[openpyxl.Workbook, pd.DataFrame]:
     wb = openpyxl.load_workbook(path)
-    ref_ws = wb[reference_sheet]
     fill_ws = wb[fill_sheet]
-    ref_headers = normalized_headers(ref_ws)
     fill_headers = add_audit_columns(fill_ws)
 
     barcode_col = find_column(fill_headers, "barcode")
@@ -533,11 +530,7 @@ def process_workbook(
         barcode = str(fill_ws.cell(row_idx, barcode_col).value or "").strip().replace(".0", "")
         product = str(fill_ws.cell(row_idx, product_col).value or "") if product_col else ""
         row = {"barcode": barcode, "product name": product}
-        reference_values = None
-        if reference_sheet != fill_sheet:
-            reference_values = fill_from_reference(ref_ws, ref_headers, barcode)
-        if not reference_values or missing_required_fields(reference_values):
-            reference_values = fill_from_builtin_reference(barcode) or reference_values
+        reference_values = fill_from_builtin_reference(barcode)
         result = process_row(row, reference_values, use_defaults)
 
         for header, value in result.values.items():
@@ -604,17 +597,12 @@ def main_app() -> None:
     path = save_upload(uploaded)
     wb = openpyxl.load_workbook(path)
     names = wb.sheetnames
-    col1, col2 = st.columns(2)
-    reference_sheet = col1.selectbox("Completed reference sheet", names, index=names.index("Sheet1") if "Sheet1" in names else 0)
-    fill_sheet = col2.selectbox("Sheet to fill", names, index=names.index("Sheet2") if "Sheet2" in names else min(1, len(names) - 1))
-    if reference_sheet == fill_sheet:
-        st.warning(
-            "The same sheet is selected for reference and filling. Workbook reference matching will be skipped, "
-            "and the app will use the built-in reference database plus online search."
-        )
+    fill_sheet = st.selectbox(
+        "Sheet to fill",
+        names,
+        index=names.index("Sheet2") if "Sheet2" in names else 0,
+    )
 
-    with st.expander("Preview completed reference", expanded=False):
-        st.dataframe(dataframe_from_sheet(wb[reference_sheet]), use_container_width=True)
     with st.expander("Preview sheet to fill", expanded=True):
         st.dataframe(dataframe_from_sheet(wb[fill_sheet]), use_container_width=True)
 
@@ -628,7 +616,6 @@ def main_app() -> None:
         with st.status("Processing rows one by one...", expanded=True) as status:
             processed_wb, report = process_workbook(
                 path,
-                reference_sheet,
                 fill_sheet,
                 use_defaults,
                 None if limit == 0 else int(limit),

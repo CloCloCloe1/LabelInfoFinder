@@ -33,9 +33,9 @@ Open `http://127.0.0.1:8505`.
 - Admin can add, disable, and update users.
 - Viewer can upload, process, manually edit, and export.
 - Upload `.xlsx` workbooks.
-- Preview completed reference sheet and raw sheet.
-- Choose reference sheet and sheet to fill.
-- Fill rows by barcode match from the completed reference sheet.
+- Preview the sheet that needs filling.
+- Choose the sheet to fill, with `Sheet2` selected automatically when present.
+- Use the built-in output reference style and approved example data when barcode matches.
 - Search online by barcode or product name when no reference match exists.
 - Preserve workbook sheet names, column order, and formatting as much as possible.
 - Use `need to review` when ingredients, manufacturer, COO, or source data are not confidently found.
