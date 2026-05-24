@@ -90,17 +90,18 @@ SEARCH_LANGUAGE_HINTS = [
 
 KNOWN_ONLINE_PRODUCTS = {
     "1129343972": {
-        "source_url": "https://www.asianbeautywholesale.com/en/into-you-glowing-lipstick-8-colors-gl08-red-brown-3g/info.html/pid.1129343972\nhttps://www.intoyoucosmetics.com/en-ca/products/into-you-glow-lipstick\nhttps://www.yesstyle.com/en/into-you-glowing-lipstick-8-colors-gl08-red-brown-3g/info.html/pid.1129343972\nhttps://www.uniquebunny.com/products/into-you-glow-lipstick\nhttps://www.intoyoucosmetics.com/en-ca/pages/about-us",
+        "source_url": "https://www.asianbeautywholesale.com/en/into-you-glowing-lipstick-8-colors-gl08-red-brown-3g/info.html/pid.1129343972\nhttps://www.intoyoucosmetics.com/en-ca/products/into-you-glow-lipstick?variant=57958599524655\nhttps://www.intoyoucosmetics.com/en-ca/products/into-you-glow-lipstick?variant=57958599590191\nhttps://www.yesstyle.com/en/into-you-glowing-lipstick-8-colors-gl08-red-brown-3g/info.html/pid.1129343972\nhttps://www.uniquebunny.com/products/into-you-glow-lipstick\nhttps://www.intoyoucosmetics.com/en-ca/pages/about-us",
         "net weight": "Net. 3 g",
         "source_direction": "Apply a small amount directly to lips. Store below 25°C and refrigerate if the product softens.",
         "ingredients": "Isostearyl Isostearate, Polyglyceryl-2 Triisostearate, Diisostearyl Malate, Sorbitan Isostearate, Paraffin, Trimethylpentaphenyl Trisiloxane, Microcrystalline Wax, Pentaerythrityl Isostearate, Euphorbia Cerifera (Candelilla) Wax, 1,2-Hexanediol, PEG/PPG-10/1 Dimethicone, CI 77891, CI 19140, CI 45410, CI 77491, Fragrance, CI 77499, Pentaerythrityl Tetraisostearate",
         "manufacturer": "HONGKONG LETS INTERNATIONAL TRADING LIMITED",
     },
     "1126245093": {
-        "source_url": "https://www.intoyoucosmetics.com/en-gb/products/airy-lip-cheek-mud\nhttps://www.uniquebunny.com/products/into-you-airy-lip-cheek-mud\nhttps://www.yesstyle.com/en/into-you-airy-lip-cheek-mud-5-colors-c1-c5-c5-mauve-taupe-1-8g/info.html/pid.1126244966",
+        "source_url": "https://www.intoyoucosmetics.com/en-gb/products/airy-lip-cheek-mud\nhttps://www.uniquebunny.com/fr/products/into-you-airy-lip-cheek-mud\nhttps://www.uniquebunny.com/products/into-you-airy-lip-cheek-mud\nhttps://www.yesstyle.com/en/into-you-airy-lip-cheek-mud-5-colors-c1-c5-c5-mauve-taupe-1-8g/info.html/pid.1126244966",
         "net weight": "Net. 2 g",
         "source_direction": "Apply a proper amount evenly on lips, or dab onto cheeks and blend with fingertips.",
         "coo": "Made In China / Fabriqué En Chine",
+        "ingredients_fr": "Diméthicone, polymère croisé de diméthicone, triisostéarate de polyglycéryle-2, cyclopentasiloxane, cyclohexasiloxane, CI 19140, 1,2-hexanediol, silylate de silice, cétyl PEG/PPG-10/1 diméthicone, talc, CI 77491, CI 77891, extrait de Melaleuca Alternifolia, huile d'onagre, acétate d'alpha-tocophéryle, C30-45 Alkyl Diméthicone",
     },
 }
 
@@ -426,7 +427,7 @@ def domain_from_url(url: str) -> str:
 def ingredients_from_text(text: str) -> str | None:
     patterns = [
         r"major\s+ingredients?\s*[:：]?\s*(.{40,2000}?)(?:more|ingredients subject|product information|details|catalog|how to use|$)",
-        r"(?:ingredients?|inci)\s*[:：]\s*(.{40,2000}?)(?:directions?|how to use|caution|warning|made in|product information|catalog|$)",
+        r"(?:ingredients?|ingrédients?|inci)\s*[:：]?\s*(.{40,2000}?)(?:directions?|mode d’emploi|how to use|caution|warning|made in|product information|catalog|$)",
     ]
     ingredients = ""
     for pattern in patterns:
@@ -436,19 +437,118 @@ def ingredients_from_text(text: str) -> str | None:
             break
     if not ingredients:
         return None
-    ingredients = re.sub(r"\b(GL|C|W|N|VT)\d{1,3}\b\s*", "", ingredients)
-    ingredients = re.sub(r"\s*<br\s*/?>\s*", ", ", ingredients, flags=re.I)
-    ingredients = re.sub(r"\s+", " ", ingredients).strip(" .;")
+    ingredients = normalize_ingredients_text(ingredients)
     if len(ingredients) < 40 or "," not in ingredients:
         return None
-    return f"INGREDIENTS/INGRÉDIENTS: {ingredients} / need to review"
+    return ingredients_label(ingredients)
+
+
+def normalize_ingredients_text(ingredients: str) -> str:
+    ingredients = re.sub(r"\b(GL|PG|VT)\d{1,3}\b\s*", "", ingredients)
+    ingredients = re.sub(r"(?<![A-Za-z])(?:C|W|N)\d{1,3}(?![-\w])\s*", "", ingredients)
+    ingredients = re.sub(r"\s*<br\s*/?>\s*", ", ", ingredients, flags=re.I)
+    ingredients = re.sub(r"\s+", " ", ingredients).strip(" .;")
+    ingredients = re.sub(r"\bwater\b", "Aqua", ingredients, flags=re.I)
+    ingredients = re.sub(r"\bINCI\b\s*$", "", ingredients).strip(" .;,")
+    return ingredients
 
 
 def ingredients_label(ingredients: str | None) -> str:
     if not ingredients:
         return "need to review"
-    clean = ingredients.strip(" .;")
-    return f"INGREDIENTS/INGRÉDIENTS: {clean} / need to review"
+    clean = normalize_ingredients_text(ingredients)
+    if not clean:
+        return "need to review"
+    english, french = bilingual_ingredients(clean)
+    return f"INGREDIENTS/INGRÉDIENTS: {english} / {french}"
+
+
+def ingredients_label_from_known(known: dict[str, str]) -> str:
+    if known.get("ingredients"):
+        return ingredients_label(known.get("ingredients"))
+    if known.get("ingredients_fr"):
+        return ingredients_label(known.get("ingredients_fr"))
+    return "need to review"
+
+
+def bilingual_ingredients(ingredients: str) -> tuple[str, str]:
+    clean = normalize_ingredients_text(ingredients)
+    if looks_french_ingredients(clean):
+        french = clean
+        english = translate_ingredients(clean, FR_TO_EN_INGREDIENTS)
+    else:
+        english = clean
+        french = translate_ingredients(clean, EN_TO_FR_INGREDIENTS)
+    return english, french
+
+
+def looks_french_ingredients(text: str) -> bool:
+    low = text.lower()
+    markers = ["diméthicone", "polymère", "croisé", "triisostéarate", "extrait", "huile", "acétate"]
+    return any(marker in low for marker in markers)
+
+
+EN_TO_FR_INGREDIENTS = {
+    "Isostearyl Isostearate": "Isostéarate d’isostéaryle",
+    "Polyglyceryl-2 Triisostearate": "Triisostéarate de polyglycéryle-2",
+    "Diisostearyl Malate": "Malate de diisostéaryle",
+    "Sorbitan Isostearate": "Isostéarate de sorbitan",
+    "Paraffin": "Paraffine",
+    "Trimethylpentaphenyl Trisiloxane": "Triméthylpentaphényl trisiloxane",
+    "Microcrystalline Wax": "Cire microcristalline",
+    "Pentaerythrityl Isostearate": "Isostéarate de pentaérythrityle",
+    "Euphorbia Cerifera (Candelilla) Wax": "Cire d’Euphorbia cerifera (candelilla)",
+    "1,2-Hexanediol": "1,2-hexanediol",
+    "PEG/PPG-10/1 Dimethicone": "PEG/PPG-10/1 diméthicone",
+    "Fragrance": "Parfum",
+    "Pentaerythrityl Tetraisostearate": "Tétraisostéarate de pentaérythrityle",
+    "Dimethicone": "Diméthicone",
+    "Dimethicone Crosspolymer": "Polymère croisé de diméthicone",
+    "Polydimethylsiloxane": "Polydiméthylsiloxane",
+    "Cyclopentasiloxane": "Cyclopentasiloxane",
+    "Cyclohexasiloxane": "Cyclohexasiloxane",
+    "Silica Silylate": "Silylate de silice",
+    "Cetyl PEG/PPG-10/1 Dimethicone": "Cétyl PEG/PPG-10/1 diméthicone",
+    "Talc": "Talc",
+    "Melaleuca Alternifolia Extract": "Extrait de Melaleuca alternifolia",
+    "Evening Primrose Oil": "Huile d’onagre",
+    "Alpha-Tocopheryl Acetate": "Acétate d’alpha-tocophéryle",
+    "C30-45 Alkyl Dimethicone": "C30-45 Alkyl Diméthicone",
+    "Aqua": "Aqua",
+}
+
+FR_TO_EN_INGREDIENTS = {
+    "Diméthicone": "Dimethicone",
+    "polymère croisé de diméthicone": "Dimethicone Crosspolymer",
+    "triisostéarate de polyglycéryle-2": "Polyglyceryl-2 Triisostearate",
+    "cyclopentasiloxane": "Cyclopentasiloxane",
+    "cyclohexasiloxane": "Cyclohexasiloxane",
+    "1,2-hexanediol": "1,2-Hexanediol",
+    "silylate de silice": "Silica Silylate",
+    "cétyl PEG/PPG-10/1 diméthicone": "Cetyl PEG/PPG-10/1 Dimethicone",
+    "talc": "Talc",
+    "extrait de Melaleuca Alternifolia": "Melaleuca Alternifolia Extract",
+    "huile d'onagre": "Evening Primrose Oil",
+    "huile d’onagre": "Evening Primrose Oil",
+    "acétate d'alpha-tocophéryle": "Alpha-Tocopheryl Acetate",
+    "acétate d’alpha-tocophéryle": "Alpha-Tocopheryl Acetate",
+    "C30-45 Alkyl Diméthicone": "C30-45 Alkyl Dimethicone",
+}
+
+
+def translate_ingredients(ingredients: str, mapping: dict[str, str]) -> str:
+    parts = split_ingredients(ingredients)
+    translated = []
+    lower_map = {key.lower(): value for key, value in mapping.items()}
+    for part in parts:
+        translated.append(lower_map.get(part.lower(), mapping.get(part, part)))
+    return ", ".join(translated)
+
+
+def split_ingredients(ingredients: str) -> list[str]:
+    protected = re.sub(r"(\d),(\d)", r"\1<COMMA>\2", ingredients)
+    parts = [part.replace("<COMMA>", ",").strip() for part in protected.split(",")]
+    return [part for part in parts if part]
 
 
 def manufacturer_from_text(text: str) -> str | None:
@@ -697,7 +797,8 @@ def candidate_urls(barcode: str, product: str) -> list[str]:
             [
                 "https://www.yesstyle.com/en/into-you-glowing-lipstick-8-colors-gl08-red-brown-3g/info.html/pid.1129343972",
                 "https://www.asianbeautywholesale.com/en/into-you-glowing-lipstick-8-colors-gl08-red-brown-3g/info.html/pid.1129343972",
-                "https://www.intoyoucosmetics.com/en-ca/products/into-you-glow-lipstick",
+                "https://www.intoyoucosmetics.com/en-ca/products/into-you-glow-lipstick?variant=57958599524655",
+                "https://www.intoyoucosmetics.com/en-ca/products/into-you-glow-lipstick?variant=57958599590191",
                 "https://www.uniquebunny.com/products/into-you-glow-lipstick",
             ]
         )
@@ -706,13 +807,16 @@ def candidate_urls(barcode: str, product: str) -> list[str]:
             [
                 "https://www.yesstyle.com/en/into-you-airy-lip-cheek-mud/info.html/pid.1126245093",
                 "https://www.asianbeautywholesale.com/en/into-you-airy-lip-cheek-mud/info.html/pid.1126245093",
+                "https://www.uniquebunny.com/fr/products/into-you-airy-lip-cheek-mud",
             ]
         )
     if "into" in clean_product.lower() and "glow" in clean_product.lower() and "lipstick" in clean_product.lower():
-        candidates.append("https://www.intoyoucosmetics.com/en-ca/products/into-you-glow-lipstick")
+        candidates.append("https://www.intoyoucosmetics.com/en-ca/products/into-you-glow-lipstick?variant=57958599524655")
+        candidates.append("https://www.intoyoucosmetics.com/en-ca/products/into-you-glow-lipstick?variant=57958599590191")
         candidates.append("https://www.uniquebunny.com/products/into-you-glow-lipstick")
     if "into" in clean_product.lower() and "airy" in clean_product.lower() and "lip" in clean_product.lower():
         candidates.append("https://www.intoyoucosmetics.com/en-ca/products/airy-lip-mud")
+        candidates.append("https://www.uniquebunny.com/fr/products/into-you-airy-lip-cheek-mud")
 
     scored: list[tuple[float, str]] = []
     for url in candidates:
@@ -733,6 +837,18 @@ def candidate_urls(barcode: str, product: str) -> list[str]:
         seen.add(url)
         deduped.append(url)
     return deduped[:10]
+
+
+def known_product_fallback(barcode: str, product: str) -> dict[str, str]:
+    known = KNOWN_ONLINE_PRODUCTS.get(barcode)
+    if known:
+        return known
+    clean = searchable_text(product)
+    if "into" in clean and "glow" in clean and "lipstick" in clean:
+        return KNOWN_ONLINE_PRODUCTS["1129343972"]
+    if "into" in clean and "airy" in clean and "lip" in clean and ("cheek" in clean or "mud" in clean):
+        return KNOWN_ONLINE_PRODUCTS["1126245093"]
+    return {}
 
 
 def process_row(
@@ -773,7 +889,7 @@ def process_row(
     else:
         notes.append("No reliable source found.")
 
-    known = KNOWN_ONLINE_PRODUCTS.get(barcode, {})
+    known = known_product_fallback(barcode, product)
     if known and not source_url:
         source_url = known.get("source_url", "")
         notes.append("Used approved source URLs for this SKU.")
@@ -797,7 +913,7 @@ def process_row(
     values["manufacturer"] = manufacturer_from_text(combined_text) or known.get("manufacturer") or "need to review"
     values["ingredients/ingrédients"] = (
         ingredients_from_text(combined_text)
-        or ingredients_label(known.get("ingredients"))
+        or ingredients_label_from_known(known)
         or "need to review"
     )
     values["coo"] = coo_from_text(combined_text + " " + product) or known.get("coo") or "need to review"
