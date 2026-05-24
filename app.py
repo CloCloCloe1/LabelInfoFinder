@@ -86,12 +86,14 @@ def db() -> sqlite3.Connection:
         )
         """
     )
-    if conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:
-        conn.execute(
-            "INSERT INTO users(username, password_hash, role, active) VALUES(?,?,?,1)",
-            ("admin", password_hash("change-me-now"), "admin"),
-        )
-        conn.commit()
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO users(username, password_hash, role, active)
+        VALUES(?,?,?,1)
+        """,
+        ("admin", password_hash("change-me-now"), "admin"),
+    )
+    conn.commit()
     return conn
 
 
