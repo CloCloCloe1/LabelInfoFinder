@@ -103,6 +103,13 @@ KNOWN_ONLINE_PRODUCTS = {
         "coo": "Made In China / Fabriqué En Chine",
         "ingredients_fr": "Diméthicone, polymère croisé de diméthicone, triisostéarate de polyglycéryle-2, cyclopentasiloxane, cyclohexasiloxane, CI 19140, 1,2-hexanediol, silylate de silice, cétyl PEG/PPG-10/1 diméthicone, talc, CI 77491, CI 77891, extrait de Melaleuca Alternifolia, huile d'onagre, acétate d'alpha-tocophéryle, C30-45 Alkyl Diméthicone",
     },
+    "1137202898": {
+        "source_url": "https://www.yesstyle.com/en/into-you-six-color-blush-palette-six-color-blush-palette-15g/info.html/pid.1137202898",
+        "net weight": "Net. 15 g",
+        "source_direction": "Apply the blush to cheeks with a brush. Mix, match, and layer shades as desired.",
+        "ingredients": "Talc, Mica, CI 77891, Synthetic Fluorphlogopite, Silica, Magnesium Myristate, Vinyl Dimethicone/Methicone Silsesquioxane Crosspolymer, Octyldodecanol, Isostearyl Neopentanoate, Dimethicone, Methyl Methacrylate Crosspolymer, Aluminum Myristate, Diisostearyl Malate, CI 77491, CI 75470, Ethylhexylglycerin, CI 77492, Glyceryl Caprylate, Lauroyl Lysine, CI 77499, Dimethicone Crosspolymer, Triethoxycaprylylsilane, Cocos Nucifera (Coconut) Oil, Alumina, Water, Aluminum Hydroxide, CI 73360, CI 19140, CI 45410, CI 77007, Boron Nitride",
+        "manufacturer": "HONGKONG LETS INTERNATIONAL TRADING LIMITED",
+    },
 }
 
 
@@ -514,6 +521,24 @@ EN_TO_FR_INGREDIENTS = {
     "Evening Primrose Oil": "Huile d’onagre",
     "Alpha-Tocopheryl Acetate": "Acétate d’alpha-tocophéryle",
     "C30-45 Alkyl Dimethicone": "C30-45 Alkyl Diméthicone",
+    "Talc": "Talc",
+    "Mica": "Mica",
+    "Synthetic Fluorphlogopite": "Fluorphlogopite synthétique",
+    "Silica": "Silice",
+    "Magnesium Myristate": "Myristate de magnésium",
+    "Vinyl Dimethicone/Methicone Silsesquioxane Crosspolymer": "Polymère croisé vinyl diméthicone/méthicone silsesquioxane",
+    "Octyldodecanol": "Octyldodécanol",
+    "Isostearyl Neopentanoate": "Néopentanoate d’isostéaryle",
+    "Methyl Methacrylate Crosspolymer": "Polymère croisé de méthacrylate de méthyle",
+    "Aluminum Myristate": "Myristate d’aluminium",
+    "Ethylhexylglycerin": "Éthylhexylglycérine",
+    "Glyceryl Caprylate": "Caprylate de glycéryle",
+    "Lauroyl Lysine": "Lauroyl lysine",
+    "Triethoxycaprylylsilane": "Triéthoxycaprylylsilane",
+    "Cocos Nucifera (Coconut) Oil": "Huile de Cocos nucifera (noix de coco)",
+    "Alumina": "Alumine",
+    "Aluminum Hydroxide": "Hydroxyde d’aluminium",
+    "Boron Nitride": "Nitrure de bore",
     "Aqua": "Aqua",
 }
 
@@ -586,7 +611,10 @@ def product_name_fr(product: str) -> str:
         "Glow Lipstick": "Rouge à lèvres éclat",
         "Glowing Lipstick": "Rouge à lèvres éclat",
         "Airy Lip Cheek Mud": "Baume mat aérien lèvres et joues",
+        "Six-color Blush Palette": "Palette de fards à joues six couleurs",
+        "Six-Color Blush Palette": "Palette de fards à joues six couleurs",
         "Lip Cheek Mud": "Baume mat lèvres et joues",
+        "Blush Palette": "Palette de fards à joues",
         "Lipstick": "Rouge à lèvres",
         "Lip": "Lèvres",
         "Cheek": "Joues",
@@ -691,6 +719,9 @@ def direction_for_product(product: str, source_direction: str | None) -> tuple[s
     elif "lipstick" in low or "lip" in low:
         en = "DIRECTION FOR USE: Apply directly to lips. Reapply as needed."
         fr = "MODE D’EMPLOI: Appliquer directement sur les lèvres. Réappliquer au besoin."
+    elif "blush" in low or "palette" in low:
+        en = "DIRECTION FOR USE: Apply to cheeks with a brush. Mix, match, and layer shades as desired."
+        fr = "MODE D’EMPLOI: Appliquer sur les joues à l’aide d’un pinceau. Mélanger, assortir et superposer les teintes au besoin."
     else:
         en = "DIRECTION FOR USE: Apply a proper amount to the desired area. Use as directed."
         fr = "MODE D’EMPLOI: Appliquer une quantité appropriée sur la zone souhaitée. Utiliser selon le mode d’emploi."
@@ -817,6 +848,8 @@ def candidate_urls(barcode: str, product: str) -> list[str]:
     if "into" in clean_product.lower() and "airy" in clean_product.lower() and "lip" in clean_product.lower():
         candidates.append("https://www.intoyoucosmetics.com/en-ca/products/airy-lip-mud")
         candidates.append("https://www.uniquebunny.com/fr/products/into-you-airy-lip-cheek-mud")
+    if "into" in clean_product.lower() and "six" in clean_product.lower() and "blush" in clean_product.lower():
+        candidates.append("https://www.yesstyle.com/en/into-you-six-color-blush-palette-six-color-blush-palette-15g/info.html/pid.1137202898")
 
     scored: list[tuple[float, str]] = []
     for url in candidates:
@@ -848,6 +881,8 @@ def known_product_fallback(barcode: str, product: str) -> dict[str, str]:
         return KNOWN_ONLINE_PRODUCTS["1129343972"]
     if "into" in clean and "airy" in clean and "lip" in clean and ("cheek" in clean or "mud" in clean):
         return KNOWN_ONLINE_PRODUCTS["1126245093"]
+    if "into" in clean and "six" in clean and "blush" in clean and "palette" in clean:
+        return KNOWN_ONLINE_PRODUCTS["1137202898"]
     return {}
 
 
