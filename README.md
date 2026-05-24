@@ -17,12 +17,7 @@ Private Streamlit site for filling bilingual Canadian cosmetic label information
 6. Set the main file path to `app.py`.
 7. Deploy.
 
-First login after deploy:
-
-- Username: `admin`
-- Password: `change-me-now`
-
-Change the admin password in **Manage users** immediately after the first login.
+After the first deploy, sign in with the initial admin account and change the password in **Manage users** immediately.
 
 ## Run Locally
 

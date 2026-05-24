@@ -536,7 +536,6 @@ def login_screen() -> None:
             st.session_state.user = user
             st.rerun()
         st.error("Invalid username or password.")
-    st.info("First run admin account: username `admin`, password `change-me-now`.")
 
 
 def main_app() -> None:
