@@ -60,6 +60,7 @@ REQUIRED_LABEL_FIELDS = [
     "cautions",
     "mises en garde:",
     "ingredients/ingrédients",
+    "manufacturer",
     "distributed by / distribué par:",
     "coo",
 ]
@@ -292,13 +293,19 @@ def copy_cell_style(src: openpyxl.cell.cell.Cell, dst: openpyxl.cell.cell.Cell) 
 
 def add_audit_columns(ws: openpyxl.worksheet.worksheet.Worksheet) -> dict[str, int]:
     headers = normalized_headers(ws)
-    wanted = ["source url", "source notes", "row status"]
+    if "source url" in headers and "source websites" not in headers:
+        ws.insert_cols(headers["source url"] + 1)
+        ws.cell(1, headers["source url"] + 1).value = "Source Websites"
+        copy_cell_style(ws.cell(1, headers["source url"]), ws.cell(1, headers["source url"] + 1))
+        headers = normalized_headers(ws)
+
+    wanted = ["source url", "source websites", "source notes", "row status"]
     for label in wanted:
         if label not in headers:
             col = ws.max_column + 1
             ws.cell(1, col).value = label.title()
             copy_cell_style(ws.cell(1, 1), ws.cell(1, col))
-            headers[label] = col
+            headers = normalized_headers(ws)
     return headers
 
 
@@ -326,6 +333,11 @@ def coo_from_text(text: str) -> str | None:
         if f"made in {key}" in low or f"product of {key}" in low or key in low:
             return value
     return None
+
+
+def domain_from_url(url: str) -> str:
+    domain = urlparse(url).netloc.lower()
+    return domain.removeprefix("www.")
 
 
 def ingredients_from_text(text: str) -> str | None:
@@ -367,6 +379,7 @@ class FillResult:
     values: dict[str, str]
     status: str
     source_url: str
+    source_websites: str
     notes: str
 
 
@@ -403,6 +416,27 @@ def missing_required_fields(values: dict[str, str]) -> list[str]:
     return missing
 
 
+def is_input_row_blank(barcode: str, product: str) -> bool:
+    return not str(barcode or "").strip() and not str(product or "").strip()
+
+
+def clear_generated_row(
+    ws: openpyxl.worksheet.worksheet.Worksheet,
+    headers: dict[str, int],
+    row_idx: int,
+) -> None:
+    generated_headers = REQUIRED_LABEL_FIELDS + [
+        "source url",
+        "source websites",
+        "source notes",
+        "row status",
+    ]
+    for header in generated_headers:
+        col = find_column(headers, header)
+        if col:
+            ws.cell(row_idx, col).value = None
+
+
 def process_row(
     row: dict[str, Any],
     reference_values: dict[str, str] | None,
@@ -412,28 +446,40 @@ def process_row(
     barcode = str(row.get("barcode") or "").replace(".0", "")
     values: dict[str, str] = {}
     source_url = ""
+    source_websites = ""
     notes: list[str] = []
 
     if reference_values:
         values.update(reference_values)
         notes.append("Matched reference data by barcode.")
         missing = missing_required_fields(values)
+        for field in missing:
+            values[field] = "need to review"
         status = "Completed" if not missing else "Need to review"
         if missing:
             notes.append("Missing required fields: " + ", ".join(missing) + ".")
-        return FillResult(values, status, "Reference data", " ".join(notes))
+        return FillResult(
+            values,
+            status,
+            "Built-in reference data",
+            "Built-in reference database",
+            " ".join(notes),
+        )
 
     query = barcode if barcode else product
     results = search_web(f"{query} ingredients net weight origin")
     page_text = ""
     if results:
         source_url = results[0]["url"]
+        source_websites = "; ".join(domain_from_url(result["url"]) for result in results[:3])
         page_text = fetch_text(source_url)
         notes.append(f"Search result: {results[0]['title']}")
     else:
         notes.append("No online source found.")
 
+    values["product name french"] = "need to review"
     values["net weight"] = net_weight_from_name(product) or "need to review"
+    values["manufacturer"] = "need to review"
     values["ingredients/ingrédients"] = ingredients_from_text(page_text) or "need to review"
     values["coo"] = coo_from_text(page_text + " " + product) or "need to review"
     values["distributed by / distribué par:"] = DISTRIBUTOR
@@ -443,6 +489,10 @@ def process_row(
         values["mode d’emploi"] = DEFAULT_DIRECTION_FR
         values["cautions"] = DEFAULT_CAUTION_EN
         values["mises en garde:"] = DEFAULT_CAUTION_FR
+
+    for field in REQUIRED_LABEL_FIELDS:
+        if field not in values:
+            values[field] = "need to review"
 
     restricted, hotlist_note = check_hotlist(values.get("ingredients/ingrédients", ""))
     if restricted:
@@ -455,7 +505,7 @@ def process_row(
     status = "Need to review" if missing or restricted else "Completed"
     if not source_url:
         status = "Missing source"
-    return FillResult(values, status, source_url, " ".join(notes))
+    return FillResult(values, status, source_url, source_websites, " ".join(notes))
 
 
 def dataframe_from_sheet(ws: openpyxl.worksheet.worksheet.Worksheet, rows: int = 20) -> pd.DataFrame:
@@ -529,6 +579,9 @@ def process_workbook(
     for row_idx in range(2, max_row + 1):
         barcode = str(fill_ws.cell(row_idx, barcode_col).value or "").strip().replace(".0", "")
         product = str(fill_ws.cell(row_idx, product_col).value or "") if product_col else ""
+        if is_input_row_blank(barcode, product):
+            clear_generated_row(fill_ws, fill_headers, row_idx)
+            continue
         row = {"barcode": barcode, "product name": product}
         reference_values = fill_from_builtin_reference(barcode)
         result = process_row(row, reference_values, use_defaults)
@@ -541,6 +594,7 @@ def process_workbook(
                     copy_cell_style(fill_ws.cell(row_idx - 1, col), fill_ws.cell(row_idx, col))
 
         fill_ws.cell(row_idx, fill_headers["source url"]).value = result.source_url
+        fill_ws.cell(row_idx, fill_headers["source websites"]).value = result.source_websites
         fill_ws.cell(row_idx, fill_headers["source notes"]).value = result.notes
         fill_ws.cell(row_idx, fill_headers["row status"]).value = result.status
         records.append(
@@ -550,6 +604,7 @@ def process_workbook(
                 "product": product,
                 "status": result.status,
                 "source_url": result.source_url,
+                "source_websites": result.source_websites,
                 "notes": result.notes,
             }
         )
