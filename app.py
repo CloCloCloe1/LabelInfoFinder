@@ -78,6 +78,9 @@ SHARED_FAMILY_FIELDS = [
 ]
 
 TRUSTED_DOMAINS = [
+    "fwee.us",
+    "ulta.com",
+    "hwahae.com",
     "judydoll.com",
     "millefee.com",
     "joybeautyhub.shop",
@@ -88,6 +91,45 @@ TRUSTED_DOMAINS = [
     "kiseki.ca",
     "oliveyoung.com",
     "stylevana.com",
+]
+
+FWEE_REFERENCE_SOURCE_RULES = [
+    (
+        ("fwee", "glowy", "jelly", "pot"),
+        (
+            "https://fwee.us/products/jelly-pot\n"
+            "https://www.ulta.com/p/lip-cheek-glowy-jelly-pot-pimprod2053366"
+        ),
+    ),
+    (
+        ("fwee", "rose", "obsession", "stay", "fit", "lip", "tint"),
+        (
+            "https://www.yesstyle.com/en/fwee-rose-obsession/info.html/pid.1136684590\n"
+            "https://www.hwahae.com/en/products/fwee-Rose-Obsession-Stay-fit-Lip-Tint-GW02-Spring-Rose/2179463"
+        ),
+    ),
+    (
+        ("fwee", "3d", "voluming", "gloss"),
+        (
+            "https://fwee.us/products/3d-voluming-gloss\n"
+            "https://www.ulta.com/p/3d-voluming-gloss-70-pimprod2053324"
+        ),
+    ),
+    (
+        ("fwee", "pocket", "eye", "palette"),
+        (
+            "https://fwee.us/products/pocket-eye-palette-1\n"
+            "https://www.ulta.com/p/pocket-eyeshadow-palette-pimprod2053338"
+        ),
+    ),
+    (
+        ("fwee", "oversized", "silicone", "jumbo", "brush"),
+        "https://fwee.us/products/jumbo-silicone-jumbo-makeup-applicator",
+    ),
+    (
+        ("fwee", "jumbo", "silicone", "applicator"),
+        "https://fwee.us/products/jumbo-silicone-jumbo-makeup-applicator",
+    ),
 ]
 
 SEARCH_LANGUAGE_HINTS = [
@@ -1211,6 +1253,35 @@ def fill_from_builtin_reference(barcode: str) -> dict[str, str] | None:
     return builtin_reference_data().get(str(barcode).strip().replace(".0", ""))
 
 
+def reference_source_url(
+    barcode: str,
+    product: str,
+    reference_values: dict[str, str],
+    family_context: dict[str, Any] | None = None,
+) -> str:
+    for key in ["source url", "source_url", "reference url", "reference_url"]:
+        source = str(reference_values.get(key) or "").strip()
+        if source:
+            return source
+
+    known = known_product_fallback(barcode, product)
+    if known.get("source_url"):
+        return known["source_url"]
+
+    if family_context and not source_url_is_missing(family_context.get("source_url", "")):
+        return family_context["source_url"]
+
+    clean = searchable_text(product or reference_values.get("product name", ""))
+    for required_tokens, source in FWEE_REFERENCE_SOURCE_RULES:
+        if all(token in clean for token in required_tokens):
+            return source
+
+    urls = candidate_urls(barcode, product or reference_values.get("product name", ""))
+    if urls:
+        return "\n".join(urls[:4])
+    return "need to review"
+
+
 def missing_required_fields(values: dict[str, str]) -> list[str]:
     missing = []
     for field in REQUIRED_LABEL_FIELDS:
@@ -1283,6 +1354,36 @@ def candidate_urls(barcode: str, product: str) -> list[str]:
             candidates.append("https://www.yesstyle.com/en/millefee-idol-highlighter-palette-02-rose-pink/info.html/pid.1137196649")
         if "ice" in clean_product.lower() or barcode == "1137196647":
             candidates.append("https://www.yesstyle.com/en/millefee-idol-highlighter-palette-01-ice-blue/info.html/pid.1137196647")
+    if "fwee" in clean_product.lower() and "glowy" in clean_product.lower() and "jelly" in clean_product.lower():
+        candidates.extend(
+            [
+                "https://fwee.us/products/jelly-pot",
+                "https://www.ulta.com/p/lip-cheek-glowy-jelly-pot-pimprod2053366",
+            ]
+        )
+    if "fwee" in clean_product.lower() and "rose" in clean_product.lower() and "stay" in clean_product.lower() and "tint" in clean_product.lower():
+        candidates.extend(
+            [
+                "https://www.yesstyle.com/en/fwee-rose-obsession/info.html/pid.1136684590",
+                "https://www.hwahae.com/en/products/fwee-Rose-Obsession-Stay-fit-Lip-Tint-GW02-Spring-Rose/2179463",
+            ]
+        )
+    if "fwee" in clean_product.lower() and "3d" in clean_product.lower() and "voluming" in clean_product.lower() and "gloss" in clean_product.lower():
+        candidates.extend(
+            [
+                "https://fwee.us/products/3d-voluming-gloss",
+                "https://www.ulta.com/p/3d-voluming-gloss-70-pimprod2053324",
+            ]
+        )
+    if "fwee" in clean_product.lower() and "pocket" in clean_product.lower() and "eye" in clean_product.lower() and "palette" in clean_product.lower():
+        candidates.extend(
+            [
+                "https://fwee.us/products/pocket-eye-palette-1",
+                "https://www.ulta.com/p/pocket-eyeshadow-palette-pimprod2053338",
+            ]
+        )
+    if "fwee" in clean_product.lower() and "silicone" in clean_product.lower() and ("jumbo" in clean_product.lower() or "applicator" in clean_product.lower()):
+        candidates.append("https://fwee.us/products/jumbo-silicone-jumbo-makeup-applicator")
 
     scored: list[tuple[float, str]] = []
     for url in candidates:
@@ -1368,6 +1469,11 @@ def verified_known_product(known: dict[str, str]) -> bool:
     )
 
 
+def source_url_is_missing(source_url: str) -> bool:
+    value = str(source_url or "").strip().lower()
+    return value in {"", "need to review", "built-in reference data"}
+
+
 def source_urls_from_text(source_url: str) -> list[str]:
     urls = []
     for line in str(source_url or "").splitlines():
@@ -1384,7 +1490,7 @@ def status_from_values(values: dict[str, str], source_url: str) -> str:
         if values.get(field) in (None, "", "need to review")
     ]
     restricted = bool(values.get("restricted ingredients"))
-    if not source_url:
+    if source_url_is_missing(source_url):
         return "Missing source"
     return "Need to review" if missing or restricted else "Completed"
 
@@ -1396,7 +1502,7 @@ def apply_family_context(result: FillResult, family_context: dict[str, Any] | No
     for field, value in shared_values.items():
         if value and value != "need to review" and result.values.get(field) in (None, "", "need to review"):
             result.values[field] = value
-    if not result.source_url and family_context.get("source_url"):
+    if source_url_is_missing(result.source_url) and not source_url_is_missing(family_context.get("source_url", "")):
         result.source_url = family_context["source_url"]
     result.status = status_from_values(result.values, result.source_url)
     return result
@@ -1408,7 +1514,8 @@ def family_context_from_result(result: FillResult) -> dict[str, Any]:
         for field in SHARED_FAMILY_FIELDS
         if result.values.get(field) not in (None, "", "need to review")
     }
-    return {"values": values, "source_url": result.source_url}
+    source_url = "" if source_url_is_missing(result.source_url) else result.source_url
+    return {"values": values, "source_url": source_url}
 
 
 def merge_family_context(existing: dict[str, Any] | None, new: dict[str, Any]) -> dict[str, Any]:
@@ -1418,7 +1525,7 @@ def merge_family_context(existing: dict[str, Any] | None, new: dict[str, Any]) -
     for field, value in new.get("values", {}).items():
         if value and value != "need to review":
             merged["values"][field] = value
-    if new.get("source_url"):
+    if new.get("source_url") and not source_url_is_missing(new.get("source_url", "")):
         existing_urls = source_urls_from_text(merged.get("source_url", ""))
         for url in source_urls_from_text(new["source_url"]):
             if url not in existing_urls:
@@ -1442,18 +1549,22 @@ def process_row(
     if reference_values:
         values.update(reference_values)
         notes.append("Matched reference data by barcode.")
+        source_url = reference_source_url(barcode, product, reference_values, family_context)
         missing = missing_required_fields(values)
         for field in missing:
             values[field] = "need to review"
-        status = "Completed" if not missing else "Need to review"
         if missing:
             notes.append("Missing required fields: " + ", ".join(missing) + ".")
-        return FillResult(
+        if source_url_is_missing(source_url):
+            notes.append("Reference data has no source URL; manual source review required.")
+        else:
+            notes.append("Added source URL for matched reference data.")
+        return apply_family_context(FillResult(
             values,
-            status,
-            "Built-in reference data",
+            status_from_values(values, source_url),
+            source_url,
             " ".join(notes),
-        )
+        ), family_context)
 
     known = known_product_fallback(barcode, product)
     texts: list[tuple[str, str]] = []
