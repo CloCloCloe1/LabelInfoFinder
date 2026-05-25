@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, quote_plus, unquote, urlparse
+from urllib.parse import parse_qs, quote_plus, urlencode, unquote, urlparse, urlunparse
 
 import openpyxl
 import pandas as pd
@@ -67,12 +67,17 @@ REQUIRED_LABEL_FIELDS = [
 ]
 
 TRUSTED_DOMAINS = [
+    "judydoll.com",
+    "millefee.com",
+    "joybeautyhub.shop",
     "intoyoucosmetics.com",
     "yesstyle.com",
     "asianbeautywholesale.com",
     "uniquebunny.com",
+    "kiseki.ca",
     "oliveyoung.com",
     "stylevana.com",
+    "skinsort.com",
 ]
 
 SEARCH_LANGUAGE_HINTS = [
@@ -233,7 +238,7 @@ class LinkParser(HTMLParser):
         if tag == "a":
             attrs_dict = dict(attrs)
             href = attrs_dict.get("href")
-            if href and href.startswith("http"):
+            if href and (href.startswith("http") or href.startswith("/url?")):
                 self._href = href
                 self._text = []
 
@@ -252,8 +257,13 @@ class LinkParser(HTMLParser):
 
 @st.cache_data(ttl=60 * 60)
 def search_web(query: str) -> list[dict[str, str]]:
-    headers = {"User-Agent": "Mozilla/5.0 label-research-tool/1.0"}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+        "Accept-Language": "en-US,en;q=0.9,fr;q=0.8",
+    }
     urls = [
+        f"https://www.google.com/search?q={quote_plus(query)}",
         f"https://duckduckgo.com/html/?q={quote_plus(query)}",
         f"https://www.bing.com/search?q={quote_plus(query)}",
     ]
@@ -277,15 +287,21 @@ def search_web(query: str) -> list[dict[str, str]]:
     seen = set()
     for result in results:
         result["url"] = clean_search_url(result["url"])
+        if is_noise_url(result["url"]):
+            continue
         key = result["url"].split("&")[0]
         if key not in seen:
             seen.add(key)
             deduped.append(result)
-    return sorted(deduped[:12], key=lambda item: source_rank(item["url"]))
+    return sorted(deduped, key=lambda item: source_rank(item["url"]))[:25]
 
 
 def clean_search_url(url: str) -> str:
     parsed = urlparse(url)
+    if parsed.path == "/url":
+        target = parse_qs(parsed.query).get("q", [""])[0]
+        if target.startswith("http"):
+            return target
     if "bing.com" in parsed.netloc and parsed.path.startswith("/ck/"):
         target = parse_qs(parsed.query).get("u", [""])[0]
         if target.startswith("a1"):
@@ -299,7 +315,39 @@ def clean_search_url(url: str) -> str:
                 pass
         if target.startswith("http"):
             return unquote(target)
-    return url
+    keep_params = {}
+    for key, values in parse_qs(parsed.query).items():
+        if key.lower() in {"variant", "pid"}:
+            keep_params[key] = values[-1]
+    clean_query = urlencode(keep_params)
+    return urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", clean_query, ""))
+
+
+def is_noise_url(url: str) -> bool:
+    parsed = urlparse(url)
+    domain = parsed.netloc.lower()
+    path = parsed.path.lower()
+    if any(bad in domain for bad in ["facebook", "instagram", "tiktok", "pinterest"]):
+        return True
+    noisy_parts = [
+        "/list.html",
+        "/brand/",
+        "/brands/",
+        "/collections/",
+        "/collection/",
+        "/search",
+        "/tag/",
+        "/blog",
+        "/blogs/",
+        "/category/",
+        "/categories/",
+        "/cart",
+        "/account",
+    ]
+    if any(part in path for part in noisy_parts):
+        if "/products/" not in path and "/info.html" not in path:
+            return True
+    return False
 
 
 def source_rank(url: str) -> int:
@@ -312,6 +360,33 @@ def source_rank(url: str) -> int:
     if any(noisy in domain for noisy in ["baidu.", "wikipedia.", "reddit."]):
         return 220
     return 100
+
+
+def product_detail_bonus(url: str) -> float:
+    parsed = urlparse(url)
+    domain = parsed.netloc.lower()
+    path = parsed.path.lower()
+    if "yesstyle.com" in domain and "/info.html" in path and "/pid." in path:
+        return 7.0
+    if "/products/" in path:
+        return 6.5
+    if path.endswith(".html") and not is_noise_url(url):
+        return 4.0
+    return 0.0
+
+
+def exact_product_url(url: str, product: str) -> bool:
+    if is_noise_url(url):
+        return False
+    tokens = search_tokens(product)
+    if not tokens:
+        return product_detail_bonus(url) > 0
+    haystack = searchable_text(url)
+    product_words = [token for token in tokens if token not in {"serum", "liquid", "color", "colors"}]
+    hits = sum(1 for token in product_words if token in haystack)
+    shade = shade_key(product)
+    shade_ok = not shade or shade in haystack
+    return product_detail_bonus(url) > 0 and hits >= max(2, min(4, len(product_words) - 1)) and shade_ok
 
 
 @st.cache_data(ttl=60 * 60 * 24)
@@ -332,7 +407,7 @@ def fetch_direct_text(url: str) -> str:
     try:
         response = requests.get(
             url,
-            timeout=15,
+            timeout=8,
             headers={
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                 "(KHTML, like Gecko) Chrome/124.0 Safari/537.36",
@@ -352,7 +427,7 @@ def fetch_jina_text(url: str) -> str:
     try:
         response = requests.get(
             f"https://r.jina.ai/{url}",
-            timeout=25,
+            timeout=12,
             headers={
                 "User-Agent": "Mozilla/5.0 label-research-tool/1.0",
                 "Accept": "text/plain, text/markdown, */*",
@@ -375,7 +450,7 @@ def fetch_shopify_product_text(url: str) -> str:
     try:
         response = requests.get(
             product_json_url,
-            timeout=15,
+            timeout=8,
             headers={
                 "User-Agent": "Mozilla/5.0 label-research-tool/1.0",
                 "Accept": "application/json,text/plain,*/*",
@@ -487,8 +562,15 @@ def coo_from_text(text: str) -> str | None:
     }
     low = text.lower()
     for key, value in country_map.items():
-        if f"made in {key}" in low or f"product of {key}" in low or key in low:
+        if (
+            f"made in {key}" in low
+            or f"product of {key}" in low
+            or f"country of origin {key}" in low
+            or f"country/region of origin {key}" in low
+        ):
             return value
+    if "chinese makeup brand" in low or "china makeup" in low or "chinese cosmetics" in low:
+        return country_map["china"]
     return None
 
 
@@ -497,11 +579,15 @@ def domain_from_url(url: str) -> str:
     return domain.removeprefix("www.")
 
 
-def ingredients_from_text(text: str) -> str | None:
+def ingredients_from_text(text: str, product: str = "") -> str | None:
     if not text:
         return None
+    shade_ingredients = ingredients_for_shade(text, product)
+    if shade_ingredients:
+        return ingredients_label(shade_ingredients)
     stop_words = (
-        r"\bmore\b|more information|ingredients subject|shipping policy|policies|"
+        r"\bmore\b|more information|this list of ingredients|actual ingredients|"
+        r"ingredients subject|shipping policy|policies|"
         r"product information|product details|details\s*/|"
         r"how to use|directions?|mode d’emploi|caution|warning|made in|catalog|sku|size"
     )
@@ -531,6 +617,28 @@ def ingredients_from_text(text: str) -> str | None:
     if ingredient_candidate_score(ingredients) < 4:
         return None
     return ingredients_label(ingredients)
+
+
+def ingredients_for_shade(text: str, product: str) -> str | None:
+    shade_pattern = shade_regex(product)
+    if not shade_pattern:
+        return None
+    ingredient_head = r"(?:major\s+ingredients?|ingredients?|ingr[eé]dients?)"
+    start_pattern = rf"{ingredient_head}.*?{shade_pattern}\s*[:：]?\s*"
+    stop_pattern = (
+        r"(?=(?<![/\w])#?\s*(?:0?[1-9]|[a-z]{1,3}\s*\d{1,3})\s+(?-i:[A-Z][A-Za-z]+)|"
+        r"\bmore\b|this list of ingredients|actual ingredients|ingredients subject|"
+        r"product information|shipping policy|"
+        r"how to use|directions?|caution|warning|made in|$)"
+    )
+    candidates = []
+    for match in re.finditer(start_pattern + rf"(.{{40,3000}}?){stop_pattern}", text, flags=re.I):
+        candidate = normalize_ingredients_text(match.group(1))
+        if len(candidate) >= 40 and "," in candidate and ingredient_candidate_score(candidate) >= 4:
+            candidates.append(candidate)
+    if candidates:
+        return max(candidates, key=ingredient_candidate_score)
+    return None
 
 
 def ingredient_candidate_score(ingredients: str) -> int:
@@ -696,7 +804,7 @@ def translate_ingredients(ingredients: str, mapping: dict[str, str]) -> str:
 
 
 def split_ingredients(ingredients: str) -> list[str]:
-    protected = re.sub(r"(\d),\s*(\d)", r"\1<COMMA>\2", ingredients)
+    protected = re.sub(r"(?<!\d)(\d),\s*(\d)(?=[-\w])", r"\1<COMMA>\2", ingredients)
     parts = [part.replace("<COMMA>", ",").strip() for part in protected.split(",")]
     return [part for part in parts if part]
 
@@ -738,7 +846,9 @@ def product_name_fr(product: str) -> str:
         "Airy Lip Cheek Mud": "Baume mat aérien lèvres et joues",
         "Six-color Blush Palette": "Palette de fards à joues six couleurs",
         "Six-Color Blush Palette": "Palette de fards à joues six couleurs",
+        "Liquid Blush Serum": "Sérum blush liquide",
         "Lip Cheek Mud": "Baume mat lèvres et joues",
+        "Liquid Blush": "Blush liquide",
         "Blush Palette": "Palette de fards à joues",
         "Lipstick": "Rouge à lèvres",
         "Lip": "Lèvres",
@@ -766,6 +876,32 @@ def search_tokens(product: str) -> list[str]:
     return [token for token in tokens if len(token) > 1 and token not in stopwords]
 
 
+def shade_key(product: str) -> str:
+    clean = searchable_text(product)
+    match = re.search(r"(?:#\s*)?([a-z]{0,3}\s*\d{1,3})\s+([a-z][a-z0-9]+(?:\s+[a-z][a-z0-9]+){0,2})", clean)
+    if match:
+        code = re.sub(r"\s+", "", match.group(1))
+        shade = re.sub(r"\s+", "-", match.group(2).strip())
+        return f"{code}-{shade}"
+    match = re.search(r"(?:#\s*)?(\d{1,3})\s+([a-z][a-z0-9]+(?:\s+[a-z][a-z0-9]+){0,2})", clean)
+    if match:
+        shade = re.sub(r"\s+", "-", match.group(2).strip())
+        return f"{match.group(1)}-{shade}"
+    return ""
+
+
+def shade_regex(product: str) -> str:
+    key = shade_key(product)
+    if not key:
+        return ""
+    code, _, shade = key.partition("-")
+    code_pattern = r"\s*".join(re.escape(ch) for ch in code)
+    shade_pattern = r"\s+".join(re.escape(part) for part in shade.split("-") if part)
+    if not shade_pattern:
+        return ""
+    return rf"#?\s*{code_pattern}\s+{shade_pattern}"
+
+
 def product_brand(product: str) -> str:
     tokens = search_tokens(product)
     if not tokens:
@@ -782,16 +918,26 @@ def fuzzy_queries(barcode: str, product: str) -> list[str]:
     core = " ".join(tokens[:6])
     tail = " ".join(tokens[-5:])
     queries = [
-        f"{barcode} {clean_product}",
-        f"{barcode} ingredients net weight",
-        f"\"{barcode}\"",
+        f"\"{clean_product}\"",
+        f"\"{clean_product}\" ingredients",
+        f"\"{clean_product}\" net weight",
         f"{clean_product} ingredients net weight",
         f"{clean_product} how to use ingredients",
+        f"{clean_product} official",
+        f"{clean_product} YesStyle",
+        f"{clean_product} Kiseki",
         f"{brand} {tail} ingredients" if brand and tail else "",
         f"{core} site:yesstyle.com",
+        f"{core} site:judydoll.com",
+        f"{core} site:kiseki.ca",
         f"{core} site:asianbeautywholesale.com",
-        f"{core} site:official",
     ]
+    if barcode:
+        queries[3:3] = [
+            f"{barcode} {clean_product}",
+            f"{barcode} ingredients net weight",
+            f"\"{barcode}\"",
+        ]
     if re.search(r"[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]", clean_product):
         queries.extend(
             [
@@ -811,10 +957,12 @@ def fuzzy_queries(barcode: str, product: str) -> list[str]:
         if query and query not in seen:
             seen.add(query)
             deduped.append(query)
-    return deduped[:14]
+    return deduped[:24]
 
 
 def fuzzy_source_score(url: str, title_or_text: str, barcode: str, product: str) -> float:
+    if is_noise_url(url):
+        return -10.0
     haystack = searchable_text(f"{url} {title_or_text}")
     tokens = search_tokens(product)
     score = 0.0
@@ -823,9 +971,15 @@ def fuzzy_source_score(url: str, title_or_text: str, barcode: str, product: str)
     domain_rank = source_rank(url)
     if domain_rank < 100:
         score += 6 - min(domain_rank, 5) * 0.5
+    score += product_detail_bonus(url)
     for token in tokens:
         if token in haystack:
             score += 1
+    shade = shade_key(product)
+    if shade and shade in haystack:
+        score += 5
+    elif shade:
+        score -= 2
     if "ingredients" in haystack or "major ingredients" in haystack:
         score += 2
     if "net weight" in haystack or re.search(r"\b\d+(?:\.\d+)?\s*(g|ml)\b", haystack):
@@ -838,7 +992,10 @@ def fuzzy_source_score(url: str, title_or_text: str, barcode: str, product: str)
 
 def direction_for_product(product: str, source_direction: str | None) -> tuple[str, str]:
     low = product.lower()
-    if "lip" in low and "cheek" in low:
+    if "blush serum" in low or ("liquid" in low and "blush" in low):
+        en = "DIRECTION FOR USE: Lightly dab after foundation and before setting powder. Tap and blend evenly across cheeks."
+        fr = "MODE D’EMPLOI: Tapoter légèrement après le fond de teint et avant la poudre fixatrice. Estomper uniformément sur les joues."
+    elif "lip" in low and "cheek" in low:
         en = DEFAULT_DIRECTION_EN
         fr = DEFAULT_DIRECTION_FR
     elif "lipstick" in low or "lip" in low:
@@ -975,17 +1132,37 @@ def candidate_urls(barcode: str, product: str) -> list[str]:
         candidates.append("https://www.uniquebunny.com/fr/products/into-you-airy-lip-cheek-mud")
     if "into" in clean_product.lower() and "six" in clean_product.lower() and "blush" in clean_product.lower():
         candidates.append("https://www.yesstyle.com/en/into-you-six-color-blush-palette-six-color-blush-palette-15g/info.html/pid.1137202898")
+    if "judydoll" in clean_product.lower() and "liquid" in clean_product.lower() and "blush" in clean_product.lower():
+        candidates.extend(
+            [
+                "https://judydoll.com/products/liquid-blush-serum",
+                "https://www.yesstyle.com/en/judydoll-liquid-blush-serum-4-colors-01-fig-5g/info.html/pid.1136648925",
+                "https://www.kiseki.ca/judydoll-liquid-blush.html",
+                "https://skinsort.com/products/judydoll/liquid-blush-serum",
+                "https://joybeautyhub.shop/products/liquid-blush-serum",
+            ]
+        )
+    if "millefee" in clean_product.lower() and "idol" in clean_product.lower() and "highlighter" in clean_product.lower():
+        candidates.append("https://millefee.com/products/idol-highlighter-palette")
+        if "rose" in clean_product.lower() or barcode == "1137196649":
+            candidates.append("https://www.yesstyle.com/en/millefee-idol-highlighter-palette-02-rose-pink/info.html/pid.1137196649")
+        if "ice" in clean_product.lower() or barcode == "1137196647":
+            candidates.append("https://www.yesstyle.com/en/millefee-idol-highlighter-palette-01-ice-blue/info.html/pid.1137196647")
 
     scored: list[tuple[float, str]] = []
     for url in candidates:
         scored.append((fuzzy_source_score(url, url, barcode, clean_product), url))
 
-    for query in fuzzy_queries(barcode, clean_product):
-        for result in search_web(query):
-            url = result["url"]
-            score = fuzzy_source_score(url, result.get("title", ""), barcode, clean_product)
-            if score >= 4:
-                scored.append((score, url))
+    strong_static_candidates = any(
+        exact_product_url(url, clean_product) or product_detail_bonus(url) >= 6 for url in candidates
+    )
+    if not strong_static_candidates:
+        for query in fuzzy_queries(barcode, clean_product)[:12]:
+            for result in search_web(query):
+                url = result["url"]
+                score = fuzzy_source_score(url, result.get("title", ""), barcode, clean_product)
+                if score >= 7 or exact_product_url(url, clean_product):
+                    scored.append((score, url))
 
     deduped: list[str] = []
     seen = set()
@@ -1009,6 +1186,20 @@ def known_product_fallback(barcode: str, product: str) -> dict[str, str]:
     if "into" in clean and "six" in clean and "blush" in clean and "palette" in clean:
         return KNOWN_ONLINE_PRODUCTS["1137202898"]
     return {}
+
+
+def enough_product_data(texts: list[tuple[str, str]], product: str, known: dict[str, str]) -> bool:
+    if len(texts) >= 4:
+        return True
+    if len(texts) < 2:
+        return False
+    combined = " ".join(text for _url, text in texts)
+    has_net = bool(net_weight_from_text(combined) or known.get("net weight") or net_weight_from_name(product))
+    has_ingredients = bool(
+        ingredients_from_text(combined, product)
+        or (ingredients_label_from_known(known) != "need to review")
+    )
+    return has_net and has_ingredients
 
 
 def process_row(
@@ -1038,18 +1229,20 @@ def process_row(
             " ".join(notes),
         )
 
+    known = known_product_fallback(barcode, product)
     texts: list[tuple[str, str]] = []
     for url in candidate_urls(barcode, product):
         text = fetch_text(url)
         if len(text) > 200:
             texts.append((url, text))
+            if enough_product_data(texts, product, known):
+                break
     if texts:
         source_url = "\n".join(url for url, _text in texts[:4])
         notes.append("Sources checked: " + ", ".join(domain_from_url(url) for url, _text in texts[:4]))
     else:
         notes.append("No reliable source found.")
 
-    known = known_product_fallback(barcode, product)
     if known and not source_url:
         source_url = known.get("source_url", "")
         notes.append("Used approved source URLs for this SKU.")
@@ -1072,7 +1265,7 @@ def process_row(
     values["mises en garde:"] = caution_fr
     values["manufacturer"] = manufacturer_from_text(combined_text) or known.get("manufacturer") or "need to review"
     values["ingredients/ingrédients"] = (
-        ingredients_from_text(combined_text)
+        ingredients_from_text(combined_text, product)
         or ingredients_label_from_known(known)
         or "need to review"
     )
