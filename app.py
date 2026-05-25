@@ -997,6 +997,44 @@ def product_family_key(product: str) -> str:
     return re.sub(r"\s+", " ", clean).strip()
 
 
+def cacheable_family_key(product: str) -> str:
+    family = product_family_key(product)
+    if not family:
+        return ""
+    tokens = family.split()
+    brand_tokens = {
+        "into",
+        "you",
+        "ity",
+        "judydoll",
+        "millefee",
+        "fwee",
+        "romand",
+        "peripera",
+    }
+    category_tokens = {
+        "lip",
+        "lipstick",
+        "mud",
+        "blush",
+        "serum",
+        "palette",
+        "highlighter",
+        "eye",
+        "eyeshadow",
+        "shadow",
+        "cheek",
+        "tint",
+        "balm",
+        "gloss",
+        "mascara",
+        "liner",
+        "eyeliner",
+    }
+    series_tokens = [token for token in tokens if token not in brand_tokens and token not in category_tokens]
+    return family if series_tokens else ""
+
+
 def product_brand(product: str) -> str:
     tokens = search_tokens(product)
     if not tokens:
@@ -1561,7 +1599,7 @@ def process_workbook(
             continue
         row = {"barcode": barcode, "product name": product}
         reference_values = fill_from_builtin_reference(barcode)
-        family_key = product_family_key(product)
+        family_key = cacheable_family_key(product)
         family_context = family_cache.get(family_key) if family_key else None
         result = process_row(row, reference_values, use_defaults, family_context)
         if family_key:
