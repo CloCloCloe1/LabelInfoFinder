@@ -78,9 +78,12 @@ SHARED_FAMILY_FIELDS = [
 ]
 
 TRUSTED_DOMAINS = [
+    "msh-labo.com",
     "fwee.us",
     "ulta.com",
     "hwahae.com",
+    "wcosmetics.com.au",
+    "japanmart.co.nz",
     "judydoll.com",
     "millefee.com",
     "joybeautyhub.shop",
@@ -92,6 +95,33 @@ TRUSTED_DOMAINS = [
     "oliveyoung.com",
     "stylevana.com",
 ]
+
+LOVE_LINER_CREAM_FIT_PENCIL_R = {
+    "source_url": (
+        "https://www.msh-labo.com/c/make-up/eyeliner/1112\n"
+        "https://onlineshop.japanmart.co.nz/products/love-liner-cream-fit-pencil-r-slimoval-mbr-eye-liner-0-05g\n"
+        "https://www.hwahae.com/en/products/LOVELiner-Cream-Fit-Pencil-Liner-Ultra-Slim-Medium-Brown/2183519/ingredients\n"
+        "https://www.yesstyle.com/en/msh-love-liner-cream-fit-pencil-medium-brown-pokemon-limited-edition/info.html/pid.1107147858\n"
+        "https://wcosmetics.com.au/products/love-liner-cream-fit-pencil-r"
+    ),
+    "net weight": "Net. 0.05 g",
+    "manufacturer": "msh Inc.",
+    "coo": "Made In Japan / Fabrique au Japon",
+    "source_direction": "Extend the pencil by about 1 to 2 mm and apply along the lash line. Close the cap firmly after use.",
+    "ingredients": (
+        "Trimethylsiloxysilicate, Methyl Trimethicone, Candelilla Wax Hydrocarbon, "
+        "Hydrogenated Polyisobutene, Synthetic Wax, Acrylates/Stearyl Acrylate/Dimethicone "
+        "Methacrylate Copolymer, Behenyl Alcohol, Tri(Behenic Acid/Isostearic "
+        "Acid/Eicosanedioic Acid) Glyceryl, Ricinus Communis (Castor) Seed Oil, Squalane, "
+        "Butyrospermum Parkii (Shea) Butter, Rosa Canina Fruit Oil, Persea Gratissima "
+        "(Avocado) Oil, Camellia Japonica Seed Oil, Argania Spinosa Kernel Oil, Simmondsia "
+        "Chinensis (Jojoba) Seed Oil, Macadamia Ternifolia Seed Oil, Prinsepia Utilis Seed "
+        "Oil, Limnanthes Alba (Meadowfoam) Seed Oil, Carthamus Tinctorius (Safflower) Seed "
+        "Oil, Helianthus Annuus (Sunflower) Seed Oil, Rosa Damascena Flower Extract, "
+        "Lavandula Angustifolia (Lavender) Flower Extract, Tocopherol, Tocopheryl Acetate, "
+        "Iron Oxides, Mica, Titanium Dioxide"
+    ),
+}
 
 FWEE_REFERENCE_SOURCE_RULES = [
     (
@@ -896,6 +926,33 @@ EN_TO_FR_INGREDIENTS = {
     "Aluminum Hydroxide": "Hydroxyde d’aluminium",
     "Boron Nitride": "Nitrure de bore",
     "Aqua": "Aqua",
+    "Trimethylsiloxysilicate": "Trimethylsiloxysilicate",
+    "Methyl Trimethicone": "Methyl trimethicone",
+    "Candelilla Wax Hydrocarbon": "Hydrocarbure de cire de candelilla",
+    "Hydrogenated Polyisobutene": "Polyisobutene hydrogene",
+    "Synthetic Wax": "Cire synthetique",
+    "Acrylates/Stearyl Acrylate/Dimethicone Methacrylate Copolymer": "Copolymere acrylates/acrylate de stearyle/methacrylate de dimethicone",
+    "Behenyl Alcohol": "Alcool behenylique",
+    "Tri(Behenic Acid/Isostearic Acid/Eicosanedioic Acid) Glyceryl": "Tri(behenate/isostearate/eicosanedioate) de glyceryle",
+    "Ricinus Communis (Castor) Seed Oil": "Huile de graines de Ricinus communis (ricin)",
+    "Squalane": "Squalane",
+    "Butyrospermum Parkii (Shea) Butter": "Beurre de Butyrospermum parkii (karite)",
+    "Rosa Canina Fruit Oil": "Huile de fruit de Rosa canina",
+    "Persea Gratissima (Avocado) Oil": "Huile de Persea gratissima (avocat)",
+    "Camellia Japonica Seed Oil": "Huile de graines de Camellia japonica",
+    "Argania Spinosa Kernel Oil": "Huile de noyau d'Argania spinosa",
+    "Simmondsia Chinensis (Jojoba) Seed Oil": "Huile de graines de Simmondsia chinensis (jojoba)",
+    "Macadamia Ternifolia Seed Oil": "Huile de graines de Macadamia ternifolia",
+    "Prinsepia Utilis Seed Oil": "Huile de graines de Prinsepia utilis",
+    "Limnanthes Alba (Meadowfoam) Seed Oil": "Huile de graines de Limnanthes alba",
+    "Carthamus Tinctorius (Safflower) Seed Oil": "Huile de graines de Carthamus tinctorius",
+    "Helianthus Annuus (Sunflower) Seed Oil": "Huile de graines d'Helianthus annuus",
+    "Rosa Damascena Flower Extract": "Extrait de fleur de Rosa damascena",
+    "Lavandula Angustifolia (Lavender) Flower Extract": "Extrait de fleur de Lavandula angustifolia",
+    "Tocopherol": "Tocopherol",
+    "Tocopheryl Acetate": "Acetate de tocopheryle",
+    "Iron Oxides": "Oxydes de fer",
+    "Titanium Dioxide": "Dioxyde de titane",
 }
 
 FR_TO_EN_INGREDIENTS = {
@@ -963,6 +1020,14 @@ def how_to_use_from_text(text: str) -> str | None:
 
 def product_name_fr(product: str) -> str:
     clean = normalize_product_name(product)
+    if is_love_liner_cream_fit(clean):
+        variant = " ovale ultra fin" if love_liner_variant(clean) == "Ultra Slim" else ""
+        color = " brun moyen" if love_liner_color(clean) == "Medium Brown" else ""
+        if love_liner_color(clean) == "Ash Brown":
+            color = " brun cendre"
+        elif love_liner_color(clean) == "Black":
+            color = " noir"
+        return f"Love Liner crayon eyeliner Cream Fit R{variant}{color}".strip()
     replacements = {
         "Glow Lipstick": "Rouge à lèvres éclat",
         "Glowing Lipstick": "Rouge à lèvres éclat",
@@ -987,10 +1052,71 @@ def normalize_product_name(product: str) -> str:
     return re.sub(r"\s+", " ", str(product).replace("\xa0", " ")).strip()
 
 
+def compact_text(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", normalize_product_name(value).lower())
+
+
 def searchable_text(value: str) -> str:
     text = normalize_product_name(value).lower()
     text = re.sub(r"[\-_()/|]+", " ", text)
     return re.sub(r"\s+", " ", text).strip()
+
+
+def is_love_liner_cream_fit(product: str) -> bool:
+    clean = searchable_text(product)
+    compact = compact_text(product)
+    brand_match = "loveliner" in compact or "loveerliner" in compact or "love liner" in clean
+    cream_fit_match = "creamfit" in compact or ("cream" in clean and "fit" in clean)
+    return brand_match and cream_fit_match and ("pencil" in clean or "liner" in clean)
+
+
+def love_liner_color(product: str) -> str:
+    clean = searchable_text(product)
+    compact = compact_text(product)
+    if "mediumbrown" in compact or re.search(r"\bmbr\b", clean):
+        return "Medium Brown"
+    if "ashbrown" in compact or re.search(r"\babr\b", clean):
+        return "Ash Brown"
+    if "black" in clean or re.search(r"\bbk\b", clean):
+        return "Black"
+    return ""
+
+
+def love_liner_variant(product: str) -> str:
+    clean = searchable_text(product)
+    compact = compact_text(product)
+    if "slimoval" in compact or "ultra slim" in clean or "slim oval" in clean:
+        return "Ultra Slim"
+    return ""
+
+
+def expanded_product_names(product: str) -> list[str]:
+    base = normalize_product_name(product)
+    names = [base]
+    if is_love_liner_cream_fit(base):
+        color = love_liner_color(base)
+        variant = love_liner_variant(base)
+        color_tail = f" {color}" if color else ""
+        variant_tail = f" {variant}" if variant else ""
+        names.extend(
+            [
+                f"MSH Love Liner Cream Fit Pencil R{variant_tail}{color_tail}",
+                f"LOVE Liner Cream Fit Pencil Liner{variant_tail}{color_tail}",
+                f"Love Liner Cream Fit Pencil R Slimoval{color_tail}",
+                f"Love Liner Cream Fit Pencil R SlimOval MBR",
+                f"Love Liner Cream Fit Pencil R Slimoval Medium Brown 0.05g",
+                f"MSH Love Liner Cream Fit Pencil{color_tail}",
+            ]
+        )
+    deduped: list[str] = []
+    seen = set()
+    for name in names:
+        name = re.sub(r"\s+", " ", name).strip()
+        key = name.lower()
+        if name and key not in seen:
+            seen.add(key)
+            deduped.append(name)
+    return deduped
 
 
 def search_tokens(product: str) -> list[str]:
@@ -1078,6 +1204,8 @@ def cacheable_family_key(product: str) -> str:
 
 
 def product_brand(product: str) -> str:
+    if is_love_liner_cream_fit(product):
+        return "Love Liner"
     tokens = search_tokens(product)
     if not tokens:
         return ""
@@ -1088,6 +1216,7 @@ def product_brand(product: str) -> str:
 
 def fuzzy_queries(barcode: str, product: str) -> list[str]:
     clean_product = normalize_product_name(product)
+    aliases = expanded_product_names(clean_product)
     tokens = search_tokens(clean_product)
     brand = product_brand(clean_product)
     core = " ".join(tokens[:6])
@@ -1100,13 +1229,26 @@ def fuzzy_queries(barcode: str, product: str) -> list[str]:
         f"{clean_product} how to use ingredients",
         f"{clean_product} official",
         f"{clean_product} YesStyle",
+        f"{clean_product} OliveYoung",
         f"{clean_product} Kiseki",
         f"{brand} {tail} ingredients" if brand and tail else "",
         f"{core} site:yesstyle.com",
+        f"{core} site:oliveyoung.com",
         f"{core} site:judydoll.com",
         f"{core} site:kiseki.ca",
         f"{core} site:asianbeautywholesale.com",
     ]
+    for alias in aliases[1:]:
+        queries.extend(
+            [
+                f"\"{alias}\"",
+                f"\"{alias}\" ingredients",
+                f"\"{alias}\" net weight",
+                f"{alias} YesStyle",
+                f"{alias} OliveYoung",
+                f"{alias} official",
+            ]
+        )
     if barcode:
         queries[3:3] = [
             f"{barcode} {clean_product}",
@@ -1132,7 +1274,7 @@ def fuzzy_queries(barcode: str, product: str) -> list[str]:
         if query and query not in seen:
             seen.add(query)
             deduped.append(query)
-    return deduped[:24]
+    return deduped[:36]
 
 
 def fuzzy_source_score(url: str, title_or_text: str, barcode: str, product: str) -> float:
@@ -1173,6 +1315,9 @@ def direction_for_product(product: str, source_direction: str | None) -> tuple[s
     elif "highlighter" in low:
         en = "DIRECTION FOR USE: Apply to high points of the face with a brush. Layer as desired for added glow."
         fr = "MODE D’EMPLOI: Appliquer sur les points saillants du visage à l’aide d’un pinceau. Superposer au besoin pour plus d’éclat."
+    elif "eyeliner" in low or ("eye" in low and "liner" in low) or ("pencil" in low and "liner" in low):
+        en = "DIRECTION FOR USE: Twist up 1-2 mm of product and apply along the lash line. Close cap firmly after use."
+        fr = "MODE D鈥橢MPLOI: Faire sortir 1 脿 2 mm de produit et appliquer le long de la ligne des cils. Bien refermer le capuchon apr猫s usage."
     elif "lip" in low and "cheek" in low:
         en = DEFAULT_DIRECTION_EN
         fr = DEFAULT_DIRECTION_FR
@@ -1311,6 +1456,7 @@ def clear_generated_row(
 
 def candidate_urls(barcode: str, product: str) -> list[str]:
     clean_product = normalize_product_name(product)
+    clean_lookup = " ".join(searchable_text(name) for name in expanded_product_names(clean_product))
     candidates: list[str] = []
     if barcode == "1129343972":
         candidates.extend(
@@ -1330,16 +1476,16 @@ def candidate_urls(barcode: str, product: str) -> list[str]:
                 "https://www.uniquebunny.com/fr/products/into-you-airy-lip-cheek-mud",
             ]
         )
-    if "into" in clean_product.lower() and "glow" in clean_product.lower() and "lipstick" in clean_product.lower():
+    if "into" in clean_lookup and "glow" in clean_lookup and "lipstick" in clean_lookup:
         candidates.append("https://www.intoyoucosmetics.com/en-ca/products/into-you-glow-lipstick?variant=57958599524655")
         candidates.append("https://www.intoyoucosmetics.com/en-ca/products/into-you-glow-lipstick?variant=57958599590191")
         candidates.append("https://www.uniquebunny.com/products/into-you-glow-lipstick")
-    if "into" in clean_product.lower() and "airy" in clean_product.lower() and "lip" in clean_product.lower():
+    if "into" in clean_lookup and "airy" in clean_lookup and "lip" in clean_lookup:
         candidates.append("https://www.intoyoucosmetics.com/en-ca/products/airy-lip-mud")
         candidates.append("https://www.uniquebunny.com/fr/products/into-you-airy-lip-cheek-mud")
-    if "into" in clean_product.lower() and "six" in clean_product.lower() and "blush" in clean_product.lower():
+    if "into" in clean_lookup and "six" in clean_lookup and "blush" in clean_lookup:
         candidates.append("https://www.yesstyle.com/en/into-you-six-color-blush-palette-six-color-blush-palette-15g/info.html/pid.1137202898")
-    if "judydoll" in clean_product.lower() and "liquid" in clean_product.lower() and "blush" in clean_product.lower():
+    if "judydoll" in clean_lookup and "liquid" in clean_lookup and "blush" in clean_lookup:
         candidates.extend(
             [
                 "https://judydoll.com/products/liquid-blush-serum",
@@ -1348,42 +1494,52 @@ def candidate_urls(barcode: str, product: str) -> list[str]:
                 "https://joybeautyhub.shop/products/liquid-blush-serum",
             ]
         )
-    if "millefee" in clean_product.lower() and "idol" in clean_product.lower() and "highlighter" in clean_product.lower():
+    if "millefee" in clean_lookup and "idol" in clean_lookup and "highlighter" in clean_lookup:
         candidates.append("https://millefee.com/products/idol-highlighter-palette")
-        if "rose" in clean_product.lower() or barcode == "1137196649":
+        if "rose" in clean_lookup or barcode == "1137196649":
             candidates.append("https://www.yesstyle.com/en/millefee-idol-highlighter-palette-02-rose-pink/info.html/pid.1137196649")
-        if "ice" in clean_product.lower() or barcode == "1137196647":
+        if "ice" in clean_lookup or barcode == "1137196647":
             candidates.append("https://www.yesstyle.com/en/millefee-idol-highlighter-palette-01-ice-blue/info.html/pid.1137196647")
-    if "fwee" in clean_product.lower() and "glowy" in clean_product.lower() and "jelly" in clean_product.lower():
+    if "fwee" in clean_lookup and "glowy" in clean_lookup and "jelly" in clean_lookup:
         candidates.extend(
             [
                 "https://fwee.us/products/jelly-pot",
                 "https://www.ulta.com/p/lip-cheek-glowy-jelly-pot-pimprod2053366",
             ]
         )
-    if "fwee" in clean_product.lower() and "rose" in clean_product.lower() and "stay" in clean_product.lower() and "tint" in clean_product.lower():
+    if "fwee" in clean_lookup and "rose" in clean_lookup and "stay" in clean_lookup and "tint" in clean_lookup:
         candidates.extend(
             [
                 "https://www.yesstyle.com/en/fwee-rose-obsession/info.html/pid.1136684590",
                 "https://www.hwahae.com/en/products/fwee-Rose-Obsession-Stay-fit-Lip-Tint-GW02-Spring-Rose/2179463",
             ]
         )
-    if "fwee" in clean_product.lower() and "3d" in clean_product.lower() and "voluming" in clean_product.lower() and "gloss" in clean_product.lower():
+    if "fwee" in clean_lookup and "3d" in clean_lookup and "voluming" in clean_lookup and "gloss" in clean_lookup:
         candidates.extend(
             [
                 "https://fwee.us/products/3d-voluming-gloss",
                 "https://www.ulta.com/p/3d-voluming-gloss-70-pimprod2053324",
             ]
         )
-    if "fwee" in clean_product.lower() and "pocket" in clean_product.lower() and "eye" in clean_product.lower() and "palette" in clean_product.lower():
+    if "fwee" in clean_lookup and "pocket" in clean_lookup and "eye" in clean_lookup and "palette" in clean_lookup:
         candidates.extend(
             [
                 "https://fwee.us/products/pocket-eye-palette-1",
                 "https://www.ulta.com/p/pocket-eyeshadow-palette-pimprod2053338",
             ]
         )
-    if "fwee" in clean_product.lower() and "silicone" in clean_product.lower() and ("jumbo" in clean_product.lower() or "applicator" in clean_product.lower()):
+    if "fwee" in clean_lookup and "silicone" in clean_lookup and ("jumbo" in clean_lookup or "applicator" in clean_lookup):
         candidates.append("https://fwee.us/products/jumbo-silicone-jumbo-makeup-applicator")
+    if is_love_liner_cream_fit(clean_product):
+        candidates.extend(
+            [
+                "https://www.msh-labo.com/c/make-up/eyeliner/1112",
+                "https://onlineshop.japanmart.co.nz/products/love-liner-cream-fit-pencil-r-slimoval-mbr-eye-liner-0-05g",
+                "https://www.hwahae.com/en/products/LOVELiner-Cream-Fit-Pencil-Liner-Ultra-Slim-Medium-Brown/2183519/ingredients",
+                "https://www.yesstyle.com/en/msh-love-liner-cream-fit-pencil-medium-brown-pokemon-limited-edition/info.html/pid.1107147858",
+                "https://wcosmetics.com.au/products/love-liner-cream-fit-pencil-r",
+            ]
+        )
 
     scored: list[tuple[float, str]] = []
     for url in candidates:
@@ -1421,6 +1577,11 @@ def known_product_fallback(barcode: str, product: str) -> dict[str, str]:
         return KNOWN_ONLINE_PRODUCTS["1126245093"]
     if "into" in clean and "six" in clean and "blush" in clean and "palette" in clean:
         return KNOWN_ONLINE_PRODUCTS["1137202898"]
+    if is_love_liner_cream_fit(product):
+        known = dict(LOVE_LINER_CREAM_FIT_PENCIL_R)
+        if love_liner_variant(product) != "Ultra Slim":
+            known["net weight"] = "Net. 0.1 g"
+        return known
     if "judydoll" in clean and "liquid" in clean and "blush" in clean:
         shade = shade_key(product)
         ingredients = JUDYDOLL_LIQUID_BLUSH_SERUM["shades"].get(shade)
