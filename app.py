@@ -175,6 +175,104 @@ SEARCH_LANGUAGE_HINTS = [
     "성분",
 ]
 
+PRODUCT_NAME_FR_PHRASES = {
+    "Airy Lip Cheek Mud": "baume mat aérien lèvres et joues",
+    "Airy Lip & Cheek Mud": "baume mat aérien lèvres et joues",
+    "Lip Cheek Glowy Jelly Pot": "pot gelée éclat lèvres et joues",
+    "Lip&Cheek Glowy Jelly Pot": "pot gelée éclat lèvres et joues",
+    "Lip & Cheek Glowy Jelly Pot": "pot gelée éclat lèvres et joues",
+    "Lip Cheek Mud": "baume mat lèvres et joues",
+    "Lip & Cheek Mud": "baume mat lèvres et joues",
+    "Liquid Blush Serum": "sérum blush liquide",
+    "Six-color Blush Palette": "palette de fards à joues six couleurs",
+    "Six-Color Blush Palette": "palette de fards à joues six couleurs",
+    "Idol Highlighter Palette": "palette illuminateur Idol",
+    "Highlighter Palette": "palette illuminateur",
+    "Pocket Eye Palette": "palette pour les yeux compacte",
+    "Eye Palette": "palette pour les yeux",
+    "Eyeshadow Palette": "palette de fards à paupières",
+    "Eye Shadow Palette": "palette de fards à paupières",
+    "3D Voluming Gloss": "gloss volumisant 3D",
+    "Voluming Gloss": "gloss volumisant",
+    "Stay-Fit Lip Tint": "teinte à lèvres tenue longue durée",
+    "Stay Fit Lip Tint": "teinte à lèvres tenue longue durée",
+    "Rose Obsession": "obsession rose",
+    "Glow Lipstick": "rouge à lèvres éclat",
+    "Glowing Lipstick": "rouge à lèvres éclat",
+    "Cream Fit Pencil": "crayon pour les yeux Cream Fit",
+    "CreamfIT Pencil": "crayon pour les yeux Cream Fit",
+    "Pencil Liner": "crayon pour les yeux",
+    "Eye Liner": "traceur pour les yeux",
+    "Eyeliner": "traceur pour les yeux",
+    "Lipstick": "rouge à lèvres",
+    "Lip Tint": "teinte à lèvres",
+    "Blush Serum": "sérum blush",
+    "Blush Palette": "palette de fards à joues",
+    "Blush": "blush",
+    "Ultra Slim": "ultra fin",
+    "SlimOval": "ovale ultra fin",
+    "Slim Oval": "ovale ultra fin",
+    "PENDANT KEYRING": "porte-clés pendentif",
+    "KEYRING": "porte-clés",
+    "Lip": "lèvres",
+    "Cheek": "joues",
+}
+
+SHADE_FR_TERMS = {
+    "Medium Brown": "brun moyen",
+    "Ash Brown": "brun cendré",
+    "Red Brown": "brun rouge",
+    "Rose Pink": "rose rosé",
+    "Ice Blue": "bleu glacé",
+    "Lavender Whip": "crème lavande",
+    "Milky": "laiteux",
+    "Custard": "crème anglaise",
+    "Honey Peach": "pêche au miel",
+    "Mellow Mango": "mangue douce",
+    "Juicy Punch": "punch juteux",
+    "Sugar Coat": "enrobage sucré",
+    "Lolly": "sucette",
+    "Sweets": "confiseries",
+    "Squeezed": "pressé",
+    "Sour Gummy": "bonbon gomme acide",
+    "Cherry Ppo": "cerise",
+    "Berry Jam": "confiture de baies",
+    "Cream Tea": "thé à la crème",
+    "Rosy Glaze": "glaçage rosé",
+    "Caramelized": "caramélisé",
+    "Sugar Powder": "poudre de sucre",
+    "Spring Rose": "rose printemps",
+    "Coco Rose": "rose coco",
+    "Sweet Rose": "rose douce",
+    "Apple Rose": "rose pomme",
+    "Fresh Rose": "rose fraîche",
+    "Plum Rose": "rose prune",
+    "Burnt Rose": "rose brûlée",
+    "Cinnamon Rose": "rose cannelle",
+    "Peach Rose": "rose pêche",
+    "Dried Rose": "rose séchée",
+    "Dusty Rose": "rose poussiéreuse",
+    "Pink Milk": "lait rose",
+    "Rosewood": "bois de rose",
+    "Mauve Taupe": "taupe mauve",
+    "Yogurt Peach": "pêche yogourt",
+    "Strawberry Whip": "crème fouettée à la fraise",
+    "Salty Caramel": "caramel salé",
+    "Grape Bonbon": "bonbon raisin",
+    "Cherry Cola": "cola cerise",
+    "Dirty Cola": "cola foncé",
+    "Fig": "figue",
+    "Salmon": "saumon",
+    "Black": "noir",
+    "Brown": "brun",
+    "Red": "rouge",
+    "Pink": "rose",
+    "Peach": "pêche",
+    "Coral": "corail",
+    "Mango": "mangue",
+    "Lavender": "lavande",
+}
+
 KNOWN_ONLINE_PRODUCTS = {
     "1129343972": {
         "source_url": "https://www.asianbeautywholesale.com/en/into-you-glowing-lipstick-8-colors-gl08-red-brown-3g/info.html/pid.1129343972\nhttps://www.intoyoucosmetics.com/en-ca/products/into-you-glow-lipstick?variant=57958599524655\nhttps://www.intoyoucosmetics.com/en-ca/products/into-you-glow-lipstick?variant=57958599590191\nhttps://www.yesstyle.com/en/into-you-glowing-lipstick-8-colors-gl08-red-brown-3g/info.html/pid.1129343972\nhttps://www.uniquebunny.com/products/into-you-glow-lipstick\nhttps://www.intoyoucosmetics.com/en-ca/pages/about-us",
@@ -1022,30 +1120,50 @@ def product_name_fr(product: str) -> str:
     clean = normalize_product_name(product)
     if is_love_liner_cream_fit(clean):
         variant = " ovale ultra fin" if love_liner_variant(clean) == "Ultra Slim" else ""
-        color = " brun moyen" if love_liner_color(clean) == "Medium Brown" else ""
-        if love_liner_color(clean) == "Ash Brown":
-            color = " brun cendre"
-        elif love_liner_color(clean) == "Black":
-            color = " noir"
-        return f"Love Liner crayon eyeliner Cream Fit R{variant}{color}".strip()
-    replacements = {
-        "Glow Lipstick": "Rouge à lèvres éclat",
-        "Glowing Lipstick": "Rouge à lèvres éclat",
-        "Airy Lip Cheek Mud": "Baume mat aérien lèvres et joues",
-        "Six-color Blush Palette": "Palette de fards à joues six couleurs",
-        "Six-Color Blush Palette": "Palette de fards à joues six couleurs",
-        "Liquid Blush Serum": "Sérum blush liquide",
-        "Lip Cheek Mud": "Baume mat lèvres et joues",
-        "Liquid Blush": "Blush liquide",
-        "Blush Palette": "Palette de fards à joues",
-        "Lipstick": "Rouge à lèvres",
-        "Lip": "Lèvres",
-        "Cheek": "Joues",
-    }
-    result = clean
-    for en, fr in replacements.items():
-        result = re.sub(en, fr, result, flags=re.I)
+        color = ""
+        if love_liner_color(clean):
+            color = " " + SHADE_FR_TERMS.get(love_liner_color(clean), love_liner_color(clean))
+        return f"Love Liner crayon pour les yeux Cream Fit R{variant}{color}".strip()
+    result = translate_product_terms(clean)
+    result = re.sub(r"(\d+(?:\.\d+)?)\s*g\b", r"\1 g", result, flags=re.I)
+    result = re.sub(r"(\d+(?:\.\d+)?)\s*ml\b", r"\1 mL", result, flags=re.I)
+    result = re.sub(r"\s*\+\s*", " + ", result)
+    result = re.sub(r"\)(?=\w)", ") ", result)
+    return re.sub(r"\s+", " ", result).strip()
+
+
+def translate_product_terms(product: str) -> str:
+    result = product
+    for mapping in (PRODUCT_NAME_FR_PHRASES, SHADE_FR_TERMS):
+        for english, french in sorted(mapping.items(), key=lambda item: len(item[0]), reverse=True):
+            result = replace_phrase_case_insensitive(result, english, french)
     return result
+
+
+def replace_phrase_case_insensitive(text: str, english: str, french: str) -> str:
+    escaped = re.escape(english).replace(r"\ ", r"\s+")
+    pattern = rf"(?<![A-Za-z]){escaped}(?![A-Za-z])"
+    return re.sub(pattern, french, text, flags=re.I)
+
+
+def french_name_needs_translation(value: str) -> bool:
+    clean = searchable_text(value)
+    english_terms = [
+        "lip",
+        "cheek",
+        "glowy",
+        "jelly",
+        "pocket",
+        "eye palette",
+        "eyeshadow",
+        "lip tint",
+        "voluming",
+        "gloss",
+        "highlighter",
+        "pencil",
+        "eyeliner",
+    ]
+    return any(term in clean for term in english_terms)
 
 
 def normalize_product_name(product: str) -> str:
@@ -1317,7 +1435,10 @@ def direction_for_product(product: str, source_direction: str | None) -> tuple[s
         fr = "MODE D’EMPLOI: Appliquer sur les points saillants du visage à l’aide d’un pinceau. Superposer au besoin pour plus d’éclat."
     elif "eyeliner" in low or ("eye" in low and "liner" in low) or ("pencil" in low and "liner" in low):
         en = "DIRECTION FOR USE: Twist up 1-2 mm of product and apply along the lash line. Close cap firmly after use."
-        fr = "MODE D鈥橢MPLOI: Faire sortir 1 脿 2 mm de produit et appliquer le long de la ligne des cils. Bien refermer le capuchon apr猫s usage."
+        fr = "MODE D’EMPLOI: Faire sortir 1 à 2 mm de produit et appliquer le long de la ligne des cils. Bien refermer le capuchon après usage."
+    elif ("eye" in low or "shadow" in low or "eyeshadow" in low) and "palette" in low:
+        en = "DIRECTION FOR USE: Apply to eyelids with a brush or fingertip. Blend and layer shades as desired."
+        fr = "MODE D’EMPLOI: Appliquer sur les paupières à l’aide d’un pinceau ou du bout des doigts. Estomper et superposer les teintes au besoin."
     elif "lip" in low and "cheek" in low:
         en = DEFAULT_DIRECTION_EN
         fr = DEFAULT_DIRECTION_FR
@@ -1396,6 +1517,47 @@ def fill_from_reference(
 
 def fill_from_builtin_reference(barcode: str) -> dict[str, str] | None:
     return builtin_reference_data().get(str(barcode).strip().replace(".0", ""))
+
+
+def repair_french_text(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    replacements = {
+        "D鈥橢MPLOI": "D’EMPLOI",
+        "INGR脡DIENTS": "INGRÉDIENTS",
+        "DISTRIBU脡": "DISTRIBUÉ",
+        "Fabriqu茅": "Fabriqué",
+        "Cor茅e": "Corée",
+        "Ch猫ne": "Chêne",
+        "鈥櫭ヽ": "’éc",
+        "鈥檃": "’a",
+        "鈥檜": "’u",
+        "鈥檌": "’i",
+        "鈥檕": "’o",
+        "鈥檈": "’e",
+        "鈥橢": "’E",
+        "鈥": "’",
+        "脡": "É",
+        "脠": "È",
+        "脢": "Ê",
+        "脿": "à",
+        "茅": "é",
+        "猫": "è",
+        "掳": "°",
+    }
+    repaired = value
+    for bad, good in replacements.items():
+        repaired = repaired.replace(bad, good)
+    repaired = re.sub(r"\bMODE D[’']EMPLOI\s*:\s*", "MODE D’EMPLOI: ", repaired)
+    repaired = re.sub(r"\bMISES EN GARDE\s*:\s*", "MISES EN GARDE: ", repaired)
+    repaired = re.sub(r"\bINGREDIENTS/INGR[ÉE]DIENTS\s*:\s*", "INGREDIENTS/INGRÉDIENTS: ", repaired)
+    repaired = re.sub(r"\bDISTRIBUTED BY / DISTRIBUÉ PAR\s*:\s*", "DISTRIBUTED BY / DISTRIBUÉ PAR: ", repaired)
+    repaired = re.sub(r"\s+", " ", repaired).strip()
+    return repaired
+
+
+def repair_label_values(values: dict[str, str]) -> dict[str, str]:
+    return {key: repair_french_text(value) for key, value in values.items()}
 
 
 def reference_source_url(
@@ -1709,6 +1871,10 @@ def process_row(
 
     if reference_values:
         values.update(reference_values)
+        values = repair_label_values(values)
+        source_product = product or values.get("product name", "")
+        if source_product and french_name_needs_translation(values.get("product name french", "")):
+            values["product name french"] = product_name_fr(source_product)
         notes.append("Matched reference data by barcode.")
         source_url = reference_source_url(barcode, product, reference_values, family_context)
         missing = missing_required_fields(values)
@@ -1782,6 +1948,7 @@ def process_row(
     for field in REQUIRED_LABEL_FIELDS:
         if field not in values:
             values[field] = "need to review"
+    values = repair_label_values(values)
 
     restricted, hotlist_note = check_hotlist(values.get("ingredients/ingrédients", ""))
     if restricted:
