@@ -77,7 +77,6 @@ TRUSTED_DOMAINS = [
     "kiseki.ca",
     "oliveyoung.com",
     "stylevana.com",
-    "skinsort.com",
 ]
 
 SEARCH_LANGUAGE_HINTS = [
@@ -588,6 +587,8 @@ def ingredients_from_text(text: str, product: str = "") -> str | None:
     stop_words = (
         r"\bmore\b|more information|this list of ingredients|actual ingredients|"
         r"ingredients subject|shipping policy|policies|"
+        r"ingredient-list-copy|copy find dupes|find dupes|discover better matches|"
+        r"key ingredients|ingredients explained|benefits|"
         r"product information|product details|details\s*/|"
         r"how to use|directions?|mode d’emploi|caution|warning|made in|catalog|sku|size"
     )
@@ -628,6 +629,8 @@ def ingredients_for_shade(text: str, product: str) -> str | None:
     stop_pattern = (
         r"(?=(?<![/\w])#?\s*(?:0?[1-9]|[a-z]{1,3}\s*\d{1,3})\s+(?-i:[A-Z][A-Za-z]+)|"
         r"\bmore\b|this list of ingredients|actual ingredients|ingredients subject|"
+        r"ingredient-list-copy|copy find dupes|find dupes|discover better matches|"
+        r"key ingredients|ingredients explained|benefits|"
         r"product information|shipping policy|"
         r"how to use|directions?|caution|warning|made in|$)"
     )
@@ -662,6 +665,7 @@ def ingredient_candidate_score(ingredients: str) -> int:
 
 
 def normalize_ingredients_text(ingredients: str) -> str:
+    ingredients = trim_non_ingredient_tail(ingredients)
     ingredients = re.sub(r"\bFormula\s+\d+\s*:\s*", ", ", ingredients, flags=re.I)
     ingredients = re.sub(r"\b(GL|PG|VT)\d{1,3}\b\s*", "", ingredients)
     ingredients = re.sub(r"(?<![A-Za-z])(?:C|W|N)\d{1,3}(?![-\w])\s*", "", ingredients)
@@ -672,6 +676,30 @@ def normalize_ingredients_text(ingredients: str) -> str:
     ingredients = re.sub(r"\bINCI\b\s*$", "", ingredients).strip(" .;,")
     ingredients = dedupe_adjacent_ingredients(ingredients)
     return ingredients
+
+
+def trim_non_ingredient_tail(ingredients: str) -> str:
+    markers = [
+        "ingredient-list-copy",
+        "copy find dupes",
+        "find dupes",
+        "discover better matches",
+        "key ingredients",
+        "ingredients explained",
+        "show all",
+        "skin conditioning, solvent",
+        "supports skin hydration",
+        "shields skin",
+        "benefits hydrating",
+        "class=\"inline-flex",
+    ]
+    low = ingredients.lower()
+    cut_at = len(ingredients)
+    for marker in markers:
+        idx = low.find(marker)
+        if idx != -1:
+            cut_at = min(cut_at, idx)
+    return ingredients[:cut_at].strip(" .;,/>")
 
 
 def dedupe_adjacent_ingredients(ingredients: str) -> str:
@@ -1138,7 +1166,6 @@ def candidate_urls(barcode: str, product: str) -> list[str]:
                 "https://judydoll.com/products/liquid-blush-serum",
                 "https://www.yesstyle.com/en/judydoll-liquid-blush-serum-4-colors-01-fig-5g/info.html/pid.1136648925",
                 "https://www.kiseki.ca/judydoll-liquid-blush.html",
-                "https://skinsort.com/products/judydoll/liquid-blush-serum",
                 "https://joybeautyhub.shop/products/liquid-blush-serum",
             ]
         )
