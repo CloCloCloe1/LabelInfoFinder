@@ -8,6 +8,7 @@ import secrets
 import sqlite3
 import tempfile
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
@@ -80,6 +81,9 @@ SHARED_FAMILY_FIELDS = [
 
 TRUSTED_DOMAINS = [
     "msh-labo.com",
+    "samurai-drugstore.jp",
+    "suzykirei.com",
+    "dodoskin.com",
     "fwee.us",
     "ulta.com",
     "hwahae.com",
@@ -121,6 +125,29 @@ LOVE_LINER_CREAM_FIT_PENCIL_R = {
         "Oil, Helianthus Annuus (Sunflower) Seed Oil, Rosa Damascena Flower Extract, "
         "Lavandula Angustifolia (Lavender) Flower Extract, Tocopherol, Tocopheryl Acetate, "
         "Iron Oxides, Mica, Titanium Dioxide"
+    ),
+}
+
+LOVE_LINER_LIQUID_EYELINER_R5 = {
+    "source_url": (
+        "https://www.msh-labo.com/c/loveliner/1160\n"
+        "https://www.samurai-drugstore.jp/default/4570159423723.html\n"
+        "https://suzykirei.com/products/381753\n"
+        "https://www.dodoskin.com/products/love-liner-liquid-eyeliner-r5-0-55ml-6-colors-ultra-slim-2-types"
+    ),
+    "net weight": "Net. 0.55 mL",
+    "manufacturer": "msh Inc.",
+    "coo": "Made In Japan / Fabriqué au Japon",
+    "source_direction": "Shake gently before use. Glide the tip along the lash line and close the cap firmly after use.",
+    "ingredients": (
+        "Water, Butylene Glycol, Acrylates Copolymer, Pentylene Glycol, Ammonium "
+        "Styrene/Acrylates Copolymer, 1,2-Hexanediol, Panthenol, Glycerin, Swertia "
+        "Japonica Extract, Malus Domestica Fruit Cell Culture Extract, Xanthan Gum, "
+        "Rosa Centifolia Flower Extract, Sodium Hyaluronate, Lecithin, Pinus Sylvestris "
+        "Cone Extract, Glycine, Sodium Metabisulfite, Camellia Sinensis Leaf Extract, "
+        "Zinc Chloride, Oligopeptide-20, Oligopeptide-41, Ammonium Acrylates Copolymer, "
+        "Polyglyceryl-10 Myristate, Trideceth-6 Phosphate, DPG, Glyceryl Caprylate, "
+        "Caprylyl Glycol, Sodium Dehydroacetate, Phenoxyethanol, Charcoal"
     ),
 }
 
@@ -200,6 +227,8 @@ PRODUCT_NAME_FR_PHRASES = {
     "Rose Obsession": "obsession rose",
     "Glow Lipstick": "rouge à lèvres éclat",
     "Glowing Lipstick": "rouge à lèvres éclat",
+    "Liquid Eyeliner": "traceur liquide pour les yeux",
+    "Liquid Eye Liner": "traceur liquide pour les yeux",
     "Cream Fit Pencil": "crayon pour les yeux Cream Fit",
     "CreamfIT Pencil": "crayon pour les yeux Cream Fit",
     "Pencil Liner": "crayon pour les yeux",
@@ -1139,6 +1168,11 @@ def how_to_use_from_text(text: str) -> str | None:
 
 def product_name_fr(product: str) -> str:
     clean = normalize_product_name(product)
+    if is_love_liner_liquid_eyeliner(clean):
+        color = ""
+        if love_liner_color(clean):
+            color = " " + SHADE_FR_TERMS.get(love_liner_color(clean), love_liner_color(clean))
+        return f"Love Liner traceur liquide pour les yeux R5{color}".strip()
     if is_love_liner_cream_fit(clean):
         variant = " ovale ultra fin" if love_liner_variant(clean) == "Ultra Slim" else ""
         color = ""
@@ -1209,6 +1243,14 @@ def is_love_liner_cream_fit(product: str) -> bool:
     return brand_match and cream_fit_match and ("pencil" in clean or "liner" in clean)
 
 
+def is_love_liner_liquid_eyeliner(product: str) -> bool:
+    clean = searchable_text(product)
+    compact = compact_text(product)
+    brand_match = "loveliner" in compact or "loveerliner" in compact or "love liner" in clean
+    liquid_match = "liquideyeliner" in compact or ("liquid" in clean and ("eyeliner" in clean or "eye liner" in clean))
+    return brand_match and liquid_match
+
+
 def love_liner_color(product: str) -> str:
     clean = searchable_text(product)
     compact = compact_text(product)
@@ -1245,6 +1287,18 @@ def expanded_product_names(product: str) -> list[str]:
                 f"Love Liner Cream Fit Pencil R SlimOval MBR",
                 f"Love Liner Cream Fit Pencil R Slimoval Medium Brown 0.05g",
                 f"MSH Love Liner Cream Fit Pencil{color_tail}",
+            ]
+        )
+    if is_love_liner_liquid_eyeliner(base):
+        color = love_liner_color(base) or "Black"
+        color_tail = f" {color}" if color else ""
+        names.extend(
+            [
+                f"MSH Love Liner Liquid Eyeliner R5{color_tail}",
+                f"Love Liner Liquid Eyeliner R5{color_tail} 0.55ml",
+                f"Love Liner Liquid Eyeliner R5 {color}",
+                f"msh Love Liner Liquid Eyeliner R5 {color}",
+                f"4570159423723 Love Liner Liquid Eyeliner R5 {color}",
             ]
         )
     deduped: list[str] = []
@@ -1343,7 +1397,7 @@ def cacheable_family_key(product: str) -> str:
 
 
 def product_brand(product: str) -> str:
-    if is_love_liner_cream_fit(product):
+    if is_love_liner_cream_fit(product) or is_love_liner_liquid_eyeliner(product):
         return "Love Liner"
     tokens = search_tokens(product)
     if not tokens:
@@ -1502,7 +1556,8 @@ def check_hotlist(ingredients: str) -> tuple[list[str], str]:
         if len(clean) > 4:
             candidates.append(clean)
     for ingredient in candidates:
-        if ingredient in text:
+        pattern = rf"(?<![a-z0-9]){re.escape(ingredient)}(?![a-z0-9])"
+        if re.search(pattern, text):
             found.append(ingredient.title())
     note = "Restricted/prohibited candidate found on Health Canada Hotlist." if found else ""
     return found, note
@@ -1536,8 +1591,52 @@ def fill_from_reference(
     return None
 
 
+def normalize_barcode(value: Any) -> str:
+    if value in (None, ""):
+        return ""
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        return str(int(value)) if value.is_integer() else format(value, "f").rstrip("0").rstrip(".")
+    text = str(value).strip()
+    if not text:
+        return ""
+    text = text.replace("\u00a0", "").replace(" ", "")
+    if re.fullmatch(r"\d+\.0+", text):
+        return text.split(".", 1)[0]
+    if re.fullmatch(r"\d+\.00+", text):
+        return text.split(".", 1)[0]
+    if re.fullmatch(r"\d+\.0{1,8}", text):
+        return text.split(".", 1)[0]
+    if re.search(r"[eE][+-]?\d+$", text):
+        try:
+            number = Decimal(text)
+            if number == number.to_integral_value():
+                return str(number.quantize(Decimal(1)))
+        except InvalidOperation:
+            pass
+    return text
+
+
+def normalize_barcode_columns(wb: openpyxl.Workbook) -> None:
+    for ws in wb.worksheets:
+        headers = normalized_headers(ws)
+        barcode_col = find_column(headers, "barcode")
+        if not barcode_col:
+            continue
+        ws.cell(1, barcode_col).number_format = "@"
+        for row_idx in range(2, ws.max_row + 1):
+            cell = ws.cell(row_idx, barcode_col)
+            barcode = normalize_barcode(cell.value)
+            if barcode:
+                cell.value = barcode
+            cell.number_format = "@"
+
+
 def fill_from_builtin_reference(barcode: str) -> dict[str, str] | None:
-    return builtin_reference_data().get(str(barcode).strip().replace(".0", ""))
+    return builtin_reference_data().get(normalize_barcode(barcode))
 
 
 def repair_french_text(value: Any) -> Any:
@@ -1731,6 +1830,15 @@ def candidate_urls(barcode: str, product: str) -> list[str]:
                 "https://wcosmetics.com.au/products/love-liner-cream-fit-pencil-r",
             ]
         )
+    if barcode == "4570159423723" or is_love_liner_liquid_eyeliner(clean_product):
+        candidates.extend(
+            [
+                "https://www.msh-labo.com/c/loveliner/1160",
+                "https://www.samurai-drugstore.jp/default/4570159423723.html",
+                "https://suzykirei.com/products/381753",
+                "https://www.dodoskin.com/products/love-liner-liquid-eyeliner-r5-0-55ml-6-colors-ultra-slim-2-types",
+            ]
+        )
 
     scored: list[tuple[float, str]] = []
     for url in candidates:
@@ -1768,6 +1876,8 @@ def known_product_fallback(barcode: str, product: str) -> dict[str, str]:
         return KNOWN_ONLINE_PRODUCTS["1126245093"]
     if "into" in clean and "six" in clean and "blush" in clean and "palette" in clean:
         return KNOWN_ONLINE_PRODUCTS["1137202898"]
+    if barcode == "4570159423723" or is_love_liner_liquid_eyeliner(product):
+        return dict(LOVE_LINER_LIQUID_EYELINER_R5)
     if is_love_liner_cream_fit(product):
         known = dict(LOVE_LINER_CREAM_FIT_PENCIL_R)
         if love_liner_variant(product) != "Ultra Slim":
@@ -1893,7 +2003,7 @@ def process_row(
     family_context: dict[str, Any] | None = None,
 ) -> FillResult:
     product = str(row.get("product name") or "")
-    barcode = str(row.get("barcode") or "").replace(".0", "")
+    barcode = normalize_barcode(row.get("barcode"))
     values: dict[str, str] = {}
     source_url = ""
     notes: list[str] = []
@@ -2018,7 +2128,14 @@ def apply_dataframe_to_sheet(
         ws.cell(1, col_idx).value = header if not str(header).startswith("Unnamed ") else None
     for row_idx, row in enumerate(df.itertuples(index=False), start=2):
         for col_idx, value in enumerate(row, start=1):
-            ws.cell(row_idx, col_idx).value = None if value == "" else value
+            header = str(df.columns[col_idx - 1]).strip().lower()
+            cell = ws.cell(row_idx, col_idx)
+            if "barcode" in header:
+                barcode = normalize_barcode(value)
+                cell.value = barcode or None
+                cell.number_format = "@"
+            else:
+                cell.value = None if value == "" else value
     return export_workbook(wb, output_name)
 
 
@@ -2037,6 +2154,7 @@ def export_workbook(wb: openpyxl.Workbook, name: str) -> Path:
     EXPORT_DIR.mkdir(exist_ok=True)
     safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", name).strip("_") or "filled_labels.xlsx"
     output = EXPORT_DIR / safe
+    normalize_barcode_columns(wb)
     wb.save(output)
     return output
 
@@ -2060,11 +2178,13 @@ def process_workbook(
     family_cache: dict[str, dict[str, Any]] = {}
     max_row = fill_ws.max_row if limit is None else min(fill_ws.max_row, limit + 1)
     for row_idx in range(2, max_row + 1):
-        barcode = str(fill_ws.cell(row_idx, barcode_col).value or "").strip().replace(".0", "")
+        barcode = normalize_barcode(fill_ws.cell(row_idx, barcode_col).value)
         product = str(fill_ws.cell(row_idx, product_col).value or "") if product_col else ""
         if is_input_row_blank(barcode, product):
             clear_generated_row(fill_ws, fill_headers, row_idx)
             continue
+        fill_ws.cell(row_idx, barcode_col).value = barcode
+        fill_ws.cell(row_idx, barcode_col).number_format = "@"
         row = {"barcode": barcode, "product name": product}
         reference_values = fill_from_builtin_reference(barcode)
         family_key = cacheable_family_key(product)
