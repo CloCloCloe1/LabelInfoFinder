@@ -52,7 +52,7 @@ HOTLIST_URL = (
     "cosmetics/cosmetic-ingredient-hotlist-prohibited-restricted-ingredients/"
     "hotlist.html"
 )
-INGREDIENTS_OUTPUT_PREFIX = "INGREDIENTS/INGREDIENTS IN FRENCH:"
+INGREDIENTS_OUTPUT_PREFIX = "INGREDIENTS/INGRÉDIENTS:"
 
 REQUIRED_LABEL_FIELDS = [
     "product name french",
