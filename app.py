@@ -52,6 +52,7 @@ HOTLIST_URL = (
     "cosmetics/cosmetic-ingredient-hotlist-prohibited-restricted-ingredients/"
     "hotlist.html"
 )
+INGREDIENTS_OUTPUT_PREFIX = "INGREDIENTS/INGREDIENTS IN FRENCH:"
 
 REQUIRED_LABEL_FIELDS = [
     "product name french",
@@ -944,14 +945,34 @@ def ingredient_dedupe_key(ingredient: str) -> str:
     return key
 
 
+def strip_ingredients_label_prefix(ingredients: str) -> str:
+    text = str(ingredients or "").strip()
+    text = re.sub(
+        r"^INGREDIENTS/(?:INGR[ÉE]?.?DIENTS|INGREDIENTS IN FRENCH)\s*:\s*",
+        "",
+        text,
+        flags=re.I,
+    )
+    text = re.sub(r"^INGREDIENTS\s*:\s*", "", text, flags=re.I)
+    return re.split(r"\s+/\s+", text, maxsplit=1)[0].strip()
+
+
+def english_ingredients_text(ingredients: str | None) -> str:
+    clean = normalize_ingredients_text(strip_ingredients_label_prefix(str(ingredients or "")))
+    if not clean:
+        return ""
+    if looks_french_ingredients(clean):
+        clean = translate_ingredients(clean, FR_TO_EN_INGREDIENTS)
+    return normalize_ingredients_text(clean)
+
+
 def ingredients_label(ingredients: str | None) -> str:
     if not ingredients:
         return "need to review"
-    clean = normalize_ingredients_text(ingredients)
-    if not clean:
+    english = english_ingredients_text(ingredients)
+    if not english:
         return "need to review"
-    english, french = bilingual_ingredients(clean)
-    return f"INGREDIENTS/INGRÉDIENTS: {english} / {french}"
+    return f"{INGREDIENTS_OUTPUT_PREFIX} {english}"
 
 
 def ingredients_label_from_known(known: dict[str, str]) -> str:
@@ -1475,7 +1496,7 @@ def check_hotlist(ingredients: str) -> tuple[list[str], str]:
         return [], "Could not fetch Health Canada Hotlist; review required."
     found = []
     candidates = []
-    after_prefix = ingredients.split(":", 1)[-1].split("/", 1)[0]
+    after_prefix = re.split(r"\s+/\s+", ingredients.split(":", 1)[-1], maxsplit=1)[0]
     for item in after_prefix.split(","):
         clean = re.sub(r"\([^)]*\)", "", item).strip().lower()
         if len(clean) > 4:
@@ -1550,14 +1571,22 @@ def repair_french_text(value: Any) -> Any:
         repaired = repaired.replace(bad, good)
     repaired = re.sub(r"\bMODE D[’']EMPLOI\s*:\s*", "MODE D’EMPLOI: ", repaired)
     repaired = re.sub(r"\bMISES EN GARDE\s*:\s*", "MISES EN GARDE: ", repaired)
-    repaired = re.sub(r"\bINGREDIENTS/INGR[ÉE]DIENTS\s*:\s*", "INGREDIENTS/INGRÉDIENTS: ", repaired)
+    repaired = re.sub(
+        r"\bINGREDIENTS/(?:INGR[ÉE]?.?DIENTS|INGREDIENTS IN FRENCH)\s*:\s*",
+        f"{INGREDIENTS_OUTPUT_PREFIX} ",
+        repaired,
+    )
     repaired = re.sub(r"\bDISTRIBUTED BY / DISTRIBUÉ PAR\s*:\s*", "DISTRIBUTED BY / DISTRIBUÉ PAR: ", repaired)
     repaired = re.sub(r"\s+", " ", repaired).strip()
     return repaired
 
 
 def repair_label_values(values: dict[str, str]) -> dict[str, str]:
-    return {key: repair_french_text(value) for key, value in values.items()}
+    repaired = {key: repair_french_text(value) for key, value in values.items()}
+    for key, value in list(repaired.items()):
+        if key.lower().startswith("ingredients/") and value not in (None, "", "need to review"):
+            repaired[key] = ingredients_label(value)
+    return repaired
 
 
 def reference_source_url(
