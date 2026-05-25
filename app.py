@@ -66,6 +66,17 @@ REQUIRED_LABEL_FIELDS = [
     "coo",
 ]
 
+SHARED_FAMILY_FIELDS = [
+    "net weight",
+    "direction for use",
+    "mode d’emploi",
+    "cautions",
+    "mises en garde:",
+    "manufacturer",
+    "distributed by / distribué par:",
+    "coo",
+]
+
 TRUSTED_DOMAINS = [
     "judydoll.com",
     "millefee.com",
@@ -948,12 +959,12 @@ def search_tokens(product: str) -> list[str]:
 
 def shade_key(product: str) -> str:
     clean = searchable_text(product)
-    match = re.search(r"(?:#\s*)?([a-z]{0,3}\s*\d{1,3})\s+([a-z][a-z0-9]+(?:\s+[a-z][a-z0-9]+){0,2})", clean)
+    match = re.search(r"(?:#\s*|\b)([a-z]{1,3}\s*\d{1,3})\b\s+([a-z][a-z0-9]+(?:\s+[a-z][a-z0-9]+){0,2})", clean)
     if match:
         code = re.sub(r"\s+", "", match.group(1))
         shade = re.sub(r"\s+", "-", match.group(2).strip())
         return f"{code}-{shade}"
-    match = re.search(r"(?:#\s*)?(\d{1,3})\s+([a-z][a-z0-9]+(?:\s+[a-z][a-z0-9]+){0,2})", clean)
+    match = re.search(r"(?:#\s*|\b)(\d{1,3})\b\s+([a-z][a-z0-9]+(?:\s+[a-z][a-z0-9]+){0,2})", clean)
     if match:
         shade = re.sub(r"\s+", "-", match.group(2).strip())
         return f"{match.group(1)}-{shade}"
@@ -970,6 +981,20 @@ def shade_regex(product: str) -> str:
     if not shade_pattern:
         return ""
     return rf"#?\s*{code_pattern}\s+{shade_pattern}"
+
+
+def product_family_key(product: str) -> str:
+    clean = searchable_text(product)
+    shade = shade_key(product)
+    if shade:
+        code, _, shade_name = shade.partition("-")
+        shade_words = r"\s+".join(re.escape(part) for part in shade_name.split("-") if part)
+        if shade_words:
+            clean = re.sub(rf"#?\s*{re.escape(code)}\s+{shade_words}\b\s*$", "", clean)
+    clean = re.sub(r"\b[a-z]{1,3}\s*\d{1,3}\b\s*$", "", clean)
+    clean = re.sub(r"\b#?\d{1,3}\b\s*$", "", clean)
+    clean = re.sub(r"\b(?:shade|color|colour)\s*[a-z0-9]+\b\s*$", "", clean)
+    return re.sub(r"\s+", " ", clean).strip()
 
 
 def product_brand(product: str) -> str:
@@ -1297,10 +1322,78 @@ def enough_product_data(texts: list[tuple[str, str]], product: str, known: dict[
     return has_net and has_ingredients
 
 
+def verified_known_product(known: dict[str, str]) -> bool:
+    return bool(
+        known.get("source_url")
+        and known.get("net weight")
+        and (known.get("ingredients") or known.get("ingredients_fr"))
+    )
+
+
+def source_urls_from_text(source_url: str) -> list[str]:
+    urls = []
+    for line in str(source_url or "").splitlines():
+        url = line.strip()
+        if url.startswith("http"):
+            urls.append(url)
+    return urls
+
+
+def status_from_values(values: dict[str, str], source_url: str) -> str:
+    missing = [
+        field
+        for field in REQUIRED_LABEL_FIELDS
+        if values.get(field) in (None, "", "need to review")
+    ]
+    restricted = bool(values.get("restricted ingredients"))
+    if not source_url:
+        return "Missing source"
+    return "Need to review" if missing or restricted else "Completed"
+
+
+def apply_family_context(result: FillResult, family_context: dict[str, Any] | None) -> FillResult:
+    if not family_context:
+        return result
+    shared_values = family_context.get("values", {})
+    for field, value in shared_values.items():
+        if value and value != "need to review" and result.values.get(field) in (None, "", "need to review"):
+            result.values[field] = value
+    if not result.source_url and family_context.get("source_url"):
+        result.source_url = family_context["source_url"]
+    result.status = status_from_values(result.values, result.source_url)
+    return result
+
+
+def family_context_from_result(result: FillResult) -> dict[str, Any]:
+    values = {
+        field: result.values.get(field)
+        for field in SHARED_FAMILY_FIELDS
+        if result.values.get(field) not in (None, "", "need to review")
+    }
+    return {"values": values, "source_url": result.source_url}
+
+
+def merge_family_context(existing: dict[str, Any] | None, new: dict[str, Any]) -> dict[str, Any]:
+    if not existing:
+        return new
+    merged = {"values": dict(existing.get("values", {})), "source_url": existing.get("source_url", "")}
+    for field, value in new.get("values", {}).items():
+        if value and value != "need to review":
+            merged["values"][field] = value
+    if new.get("source_url"):
+        existing_urls = source_urls_from_text(merged.get("source_url", ""))
+        for url in source_urls_from_text(new["source_url"]):
+            if url not in existing_urls:
+                existing_urls.append(url)
+        merged["source_url"] = "\n".join(existing_urls[:4])
+    return merged
+
+
 def process_row(
     row: dict[str, Any],
     reference_values: dict[str, str] | None,
     use_defaults: bool,
+    family_context: dict[str, Any] | None = None,
 ) -> FillResult:
     product = str(row.get("product name") or "")
     barcode = str(row.get("barcode") or "").replace(".0", "")
@@ -1326,17 +1419,26 @@ def process_row(
 
     known = known_product_fallback(barcode, product)
     texts: list[tuple[str, str]] = []
-    for url in candidate_urls(barcode, product):
-        text = fetch_text(url)
-        if len(text) > 200:
-            texts.append((url, text))
-            if enough_product_data(texts, product, known):
-                break
-    if texts:
-        source_url = "\n".join(url for url, _text in texts[:4])
-        notes.append("Sources checked: " + ", ".join(domain_from_url(url) for url, _text in texts[:4]))
+    if verified_known_product(known):
+        source_url = known["source_url"]
+        notes.append("Used verified product data for this shade.")
     else:
-        notes.append("No reliable source found.")
+        urls = source_urls_from_text(family_context.get("source_url", "")) if family_context else []
+        if urls:
+            notes.append("Reused source URLs from matching product family.")
+        else:
+            urls = candidate_urls(barcode, product)
+        for url in urls:
+            text = fetch_text(url)
+            if len(text) > 200:
+                texts.append((url, text))
+                if enough_product_data(texts, product, known):
+                    break
+        if texts:
+            source_url = "\n".join(url for url, _text in texts[:4])
+            notes.append("Sources checked: " + ", ".join(domain_from_url(url) for url, _text in texts[:4]))
+        else:
+            notes.append("No reliable source found.")
 
     if known and not source_url:
         source_url = known.get("source_url", "")
@@ -1378,11 +1480,8 @@ def process_row(
     elif hotlist_note:
         notes.append(hotlist_note)
 
-    missing = [k for k, v in values.items() if v == "need to review"]
-    status = "Need to review" if missing or restricted else "Completed"
-    if not source_url:
-        status = "Missing source"
-    return FillResult(values, status, source_url, " ".join(notes))
+    status = status_from_values(values, source_url)
+    return apply_family_context(FillResult(values, status, source_url, " ".join(notes)), family_context)
 
 
 def dataframe_from_sheet(ws: openpyxl.worksheet.worksheet.Worksheet, rows: int = 20) -> pd.DataFrame:
@@ -1452,6 +1551,7 @@ def process_workbook(
 
     product_col = find_column(fill_headers, "product name")
     records = []
+    family_cache: dict[str, dict[str, Any]] = {}
     max_row = fill_ws.max_row if limit is None else min(fill_ws.max_row, limit + 1)
     for row_idx in range(2, max_row + 1):
         barcode = str(fill_ws.cell(row_idx, barcode_col).value or "").strip().replace(".0", "")
@@ -1461,7 +1561,14 @@ def process_workbook(
             continue
         row = {"barcode": barcode, "product name": product}
         reference_values = fill_from_builtin_reference(barcode)
-        result = process_row(row, reference_values, use_defaults)
+        family_key = product_family_key(product)
+        family_context = family_cache.get(family_key) if family_key else None
+        result = process_row(row, reference_values, use_defaults, family_context)
+        if family_key:
+            family_cache[family_key] = merge_family_context(
+                family_cache.get(family_key),
+                family_context_from_result(result),
+            )
 
         for header, value in result.values.items():
             col = find_column(fill_headers, header)
