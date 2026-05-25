@@ -132,6 +132,32 @@ JUDYDOLL_LIQUID_BLUSH_SERUM = {
     },
 }
 
+MILLEFEE_IDOL_HIGHLIGHTER_PALETTE = {
+    "net weight": "Net. 11 g",
+    "coo": "Made In China / Fabriqué En Chine",
+    "source_direction": "Apply to high points of the face with a brush. Layer as desired for added glow.",
+    "shades": {
+        "01-ice-blue": {
+            "source_url": (
+                "https://www.yesstyle.com/en/millefee-idol-highlighter-palette-01-ice-blue/info.html/pid.1137196647\n"
+                "https://millefee.com/products/idol-highlighter-palette"
+            ),
+            "ingredients": "Synthetic Fluorphlogopite, Titanium Dioxide, Dimethicone, Silica, Phenyl Trimethicone, Calcium Aluminum Borosilicate, Diisostearyl Malate, Petrolatum, Isononyl Isononanoate, Synthetic Wax, Polyisobutene, Dimethicone/Vinyl Dimethicone Crosspolymer, Trimethylsiloxysilicate, Methyl Methacrylate Crosspolymer, Tin Oxide, Microcrystalline Wax, Caprylyl Glycol, Hydroxystearic Acid, Polymethylsilsesquioxane, Iron Oxides, Dimethicone Crosspolymer, Ethylhexylglycerin, Triethoxycaprylylsilane, Stearic Acid, Red 226, Barium Sulfate, Yellow 4, Mica, Blue 1",
+        },
+        "02-rose-pink": {
+            "source_url": (
+                "https://www.yesstyle.com/en/millefee-idol-highlighter-palette-02-rose-pink/info.html/pid.1137196649\n"
+                "https://millefee.com/products/idol-highlighter-palette"
+            ),
+            "ingredients": "Synthetic Fluorphlogopite, Titanium Dioxide, Isononyl Isononanoate, Silica, Dimethicone, Polyisobutene, Phenyl Trimethicone, Calcium Aluminum Borosilicate, Polymethylsilsesquioxane, Dimethicone Crosspolymer, Hydroxystearic Acid, Microcrystalline Wax, Caprylyl Glycol, Tin Oxide, Triethoxycaprylylsilane, Ethylhexylglycerin, Stearic Acid, Iron Oxides, Red 226, Barium Sulfate, Blue 1",
+        },
+    },
+    "barcodes": {
+        "1137196647": "01-ice-blue",
+        "1137196649": "02-rose-pink",
+    },
+}
+
 
 def ensure_dirs() -> None:
     DATA_DIR.mkdir(exist_ok=True)
@@ -1039,6 +1065,9 @@ def direction_for_product(product: str, source_direction: str | None) -> tuple[s
     if "blush serum" in low or ("liquid" in low and "blush" in low):
         en = "DIRECTION FOR USE: Lightly dab after foundation and before setting powder. Tap and blend evenly across cheeks."
         fr = "MODE D’EMPLOI: Tapoter légèrement après le fond de teint et avant la poudre fixatrice. Estomper uniformément sur les joues."
+    elif "highlighter" in low:
+        en = "DIRECTION FOR USE: Apply to high points of the face with a brush. Layer as desired for added glow."
+        fr = "MODE D’EMPLOI: Appliquer sur les points saillants du visage à l’aide d’un pinceau. Superposer au besoin pour plus d’éclat."
     elif "lip" in low and "cheek" in low:
         en = DEFAULT_DIRECTION_EN
         fr = DEFAULT_DIRECTION_FR
@@ -1238,6 +1267,18 @@ def known_product_fallback(barcode: str, product: str) -> dict[str, str]:
                 "source_direction": JUDYDOLL_LIQUID_BLUSH_SERUM["source_direction"],
                 "coo": JUDYDOLL_LIQUID_BLUSH_SERUM["coo"],
                 "ingredients": ingredients,
+            }
+    if "millefee" in clean and "idol" in clean and "highlighter" in clean:
+        shade = MILLEFEE_IDOL_HIGHLIGHTER_PALETTE["barcodes"].get(str(barcode).strip())
+        shade = shade or shade_key(product)
+        shade_data = MILLEFEE_IDOL_HIGHLIGHTER_PALETTE["shades"].get(shade)
+        if shade_data:
+            return {
+                "source_url": shade_data["source_url"],
+                "net weight": MILLEFEE_IDOL_HIGHLIGHTER_PALETTE["net weight"],
+                "source_direction": MILLEFEE_IDOL_HIGHLIGHTER_PALETTE["source_direction"],
+                "coo": MILLEFEE_IDOL_HIGHLIGHTER_PALETTE["coo"],
+                "ingredients": shade_data["ingredients"],
             }
     return {}
 
