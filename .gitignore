@@ -4,5 +4,6 @@ __pycache__/
 data/
 outputs/
 *.sqlite3
+*.log
 *.xlsx
 ~$*
