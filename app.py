@@ -203,6 +203,82 @@ SEARCH_LANGUAGE_HINTS = [
     "성분",
 ]
 
+PRODUCT_ABBREVIATIONS = {
+    "MBR": "Medium Brown",
+    "MDBR": "Medium Brown",
+    "DBR": "Dark Brown",
+    "ABR": "Ash Brown",
+    "BR": "Brown",
+    "BK": "Black",
+    "BLK": "Black",
+    "RD": "Red",
+    "PK": "Pink",
+    "CR": "Coral",
+    "OR": "Orange",
+    "BE": "Beige",
+    "GY": "Gray",
+    "GRY": "Gray",
+    "WT": "White",
+}
+
+PRODUCT_PHRASE_ALIASES = {
+    "creamfit": "Cream Fit",
+    "cream fit": "Cream Fit",
+    "slimoval": "Ultra Slim",
+    "slim oval": "Ultra Slim",
+    "ultraslim": "Ultra Slim",
+    "liquideyeliner": "Liquid Eyeliner",
+    "liquid eyeliner": "Liquid Eyeliner",
+    "eye liner": "Eyeliner",
+    "lipcheek": "Lip Cheek",
+    "lip&cheek": "Lip Cheek",
+}
+
+BRAND_ALIAS_RULES = [
+    {
+        "keywords": ("love", "liner"),
+        "patterns": [
+            r"\bmsh\s*[- ]*\s*love\s*liner\b",
+            r"\bloveer\s*liner\b",
+            r"\blove\s*liner\b",
+            r"\bloveliner\b",
+        ],
+        "aliases": ["MSH Love Liner", "Love Liner", "LoveLiner"],
+        "domains": [
+            "msh-labo.com",
+            "yesstyle.com",
+            "oliveyoung.com",
+            "samurai-drugstore.jp",
+            "suzykirei.com",
+            "dodoskin.com",
+        ],
+    },
+    {
+        "keywords": ("judydoll",),
+        "patterns": [r"\bjudy\s*doll\b", r"\bjudydoll\b"],
+        "aliases": ["Judydoll", "JudyDoll", "Judy Doll"],
+        "domains": ["judydoll.com", "yesstyle.com", "oliveyoung.com", "kiseki.ca"],
+    },
+    {
+        "keywords": ("into", "you"),
+        "patterns": [r"\binto\s*you\b", r"\bity\b"],
+        "aliases": ["INTO YOU", "INTO YOU Cosmetics", "ITY"],
+        "domains": ["intoyoucosmetics.com", "yesstyle.com", "asianbeautywholesale.com", "uniquebunny.com"],
+    },
+    {
+        "keywords": ("fwee",),
+        "patterns": [r"\bfwee\b"],
+        "aliases": ["fwee", "FWEE"],
+        "domains": ["fwee.us", "yesstyle.com", "oliveyoung.com", "ulta.com", "hwahae.com"],
+    },
+    {
+        "keywords": ("millefee",),
+        "patterns": [r"\bmille\s*fee\b", r"\bmillefee\b"],
+        "aliases": ["MilleFee", "Mille Fee"],
+        "domains": ["millefee.com", "yesstyle.com", "oliveyoung.com"],
+    },
+]
+
 PRODUCT_NAME_FR_PHRASES = {
     "Airy Lip Cheek Mud": "baume mat aérien lèvres et joues",
     "Airy Lip & Cheek Mud": "baume mat aérien lèvres et joues",
@@ -630,7 +706,10 @@ def product_detail_bonus(url: str) -> float:
 def exact_product_url(url: str, product: str) -> bool:
     if is_noise_url(url):
         return False
-    tokens = search_tokens(product)
+    tokens = []
+    for alias in expanded_product_names(product):
+        tokens.extend(search_tokens(alias))
+    tokens = list(dict.fromkeys(tokens))
     if not tokens:
         return product_detail_bonus(url) > 0
     haystack = searchable_text(url)
@@ -1235,6 +1314,80 @@ def searchable_text(value: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def expand_product_abbreviations(product: str) -> str:
+    result = normalize_product_name(product)
+    compact = compact_text(result)
+    for phrase, replacement in sorted(PRODUCT_PHRASE_ALIASES.items(), key=lambda item: len(item[0]), reverse=True):
+        if " " in phrase or "&" in phrase:
+            result = replace_phrase_case_insensitive(result, phrase, replacement)
+        elif phrase in compact:
+            result = re.sub(phrase, replacement, result, flags=re.I)
+    for abbr, full in PRODUCT_ABBREVIATIONS.items():
+        result = re.sub(rf"(?<![A-Za-z0-9]){re.escape(abbr)}(?![A-Za-z0-9])", full, result, flags=re.I)
+    return re.sub(r"\s+", " ", result).strip()
+
+
+def brand_rule_for_product(product: str) -> dict[str, Any] | None:
+    clean = searchable_text(product)
+    compact = compact_text(product)
+    for rule in BRAND_ALIAS_RULES:
+        if all(keyword in clean or keyword in compact for keyword in rule["keywords"]):
+            return rule
+        if any(re.search(pattern, clean, flags=re.I) or re.search(pattern, compact, flags=re.I) for pattern in rule["patterns"]):
+            return rule
+    return None
+
+
+def remove_brand_alias(product: str, rule: dict[str, Any] | None) -> str:
+    result = normalize_product_name(product)
+    if not rule:
+        return result
+    for pattern in rule["patterns"]:
+        result = re.sub(pattern, " ", result, count=1, flags=re.I)
+    return re.sub(r"\s+", " ", result).strip(" -_")
+
+
+def brand_domains_for_product(product: str) -> list[str]:
+    rule = brand_rule_for_product(product)
+    if not rule:
+        return []
+    return list(rule.get("domains", []))
+
+
+def generic_product_alias_names(product: str) -> list[str]:
+    base = normalize_product_name(product)
+    expanded = expand_product_abbreviations(base)
+    names = [base, expanded]
+    rule = brand_rule_for_product(expanded)
+    if rule:
+        tail = remove_brand_alias(expanded, rule)
+        for alias in rule.get("aliases", []):
+            names.append(f"{alias} {tail}".strip())
+    return names
+
+
+def generic_color_name(product: str) -> str:
+    expanded = expand_product_abbreviations(product)
+    clean = searchable_text(expanded)
+    for color in [
+        "Medium Brown",
+        "Dark Brown",
+        "Ash Brown",
+        "Black",
+        "Brown",
+        "Red",
+        "Pink",
+        "Coral",
+        "Orange",
+        "Beige",
+        "Gray",
+        "White",
+    ]:
+        if searchable_text(color) in clean:
+            return color
+    return ""
+
+
 def is_love_liner_cream_fit(product: str) -> bool:
     clean = searchable_text(product)
     compact = compact_text(product)
@@ -1260,7 +1413,7 @@ def love_liner_color(product: str) -> str:
         return "Ash Brown"
     if "black" in clean or re.search(r"\bbk\b", clean):
         return "Black"
-    return ""
+    return generic_color_name(product)
 
 
 def love_liner_variant(product: str) -> str:
@@ -1273,7 +1426,7 @@ def love_liner_variant(product: str) -> str:
 
 def expanded_product_names(product: str) -> list[str]:
     base = normalize_product_name(product)
-    names = [base]
+    names = generic_product_alias_names(base)
     if is_love_liner_cream_fit(base):
         color = love_liner_color(base)
         variant = love_liner_variant(base)
@@ -1397,8 +1550,9 @@ def cacheable_family_key(product: str) -> str:
 
 
 def product_brand(product: str) -> str:
-    if is_love_liner_cream_fit(product) or is_love_liner_liquid_eyeliner(product):
-        return "Love Liner"
+    rule = brand_rule_for_product(product)
+    if rule and rule.get("aliases"):
+        return rule["aliases"][0]
     tokens = search_tokens(product)
     if not tokens:
         return ""
@@ -1410,27 +1564,31 @@ def product_brand(product: str) -> str:
 def fuzzy_queries(barcode: str, product: str) -> list[str]:
     clean_product = normalize_product_name(product)
     aliases = expanded_product_names(clean_product)
-    tokens = search_tokens(clean_product)
+    search_basis = aliases[1] if len(aliases) > 1 else clean_product
     brand = product_brand(clean_product)
+    brand_tail = remove_brand_alias(search_basis, brand_rule_for_product(search_basis))
+    tokens = search_tokens(brand_tail or search_basis)
     core = " ".join(tokens[:6])
-    tail = " ".join(tokens[-5:])
+    tail = " ".join(tokens[:6])
+    brand_domains = brand_domains_for_product(clean_product)
     queries = [
         f"\"{clean_product}\"",
+        f"\"{search_basis}\"",
         f"\"{clean_product}\" ingredients",
-        f"\"{clean_product}\" net weight",
-        f"{clean_product} ingredients net weight",
-        f"{clean_product} how to use ingredients",
-        f"{clean_product} official",
-        f"{clean_product} YesStyle",
-        f"{clean_product} OliveYoung",
-        f"{clean_product} Kiseki",
+        f"\"{search_basis}\" ingredients",
+        f"\"{search_basis}\" net weight",
+        f"{search_basis} ingredients net weight",
+        f"{search_basis} how to use ingredients",
+        f"{search_basis} official",
+        f"{search_basis} YesStyle",
+        f"{search_basis} OliveYoung",
+        f"{search_basis} Kiseki",
         f"{brand} {tail} ingredients" if brand and tail else "",
         f"{core} site:yesstyle.com",
         f"{core} site:oliveyoung.com",
-        f"{core} site:judydoll.com",
-        f"{core} site:kiseki.ca",
-        f"{core} site:asianbeautywholesale.com",
     ]
+    for domain in brand_domains[:5]:
+        queries.append(f"{core} site:{domain}")
     for alias in aliases[1:]:
         queries.extend(
             [
@@ -1442,9 +1600,11 @@ def fuzzy_queries(barcode: str, product: str) -> list[str]:
                 f"{alias} official",
             ]
         )
+        for domain in brand_domains[:5]:
+            queries.append(f"{alias} site:{domain}")
     if barcode:
         queries[3:3] = [
-            f"{barcode} {clean_product}",
+            f"{barcode} {search_basis}",
             f"{barcode} ingredients net weight",
             f"\"{barcode}\"",
         ]
@@ -1467,14 +1627,18 @@ def fuzzy_queries(barcode: str, product: str) -> list[str]:
         if query and query not in seen:
             seen.add(query)
             deduped.append(query)
-    return deduped[:36]
+    return deduped[:48]
 
 
 def fuzzy_source_score(url: str, title_or_text: str, barcode: str, product: str) -> float:
     if is_noise_url(url):
         return -10.0
     haystack = searchable_text(f"{url} {title_or_text}")
-    tokens = search_tokens(product)
+    alias_names = expanded_product_names(product)
+    tokens = []
+    for alias in alias_names:
+        tokens.extend(search_tokens(alias))
+    tokens = list(dict.fromkeys(tokens))
     score = 0.0
     if barcode and barcode in haystack:
         score += 8
@@ -1494,9 +1658,12 @@ def fuzzy_source_score(url: str, title_or_text: str, barcode: str, product: str)
         score += 2
     if "net weight" in haystack or re.search(r"\b\d+(?:\.\d+)?\s*(g|ml)\b", haystack):
         score += 1.5
-    product_norm = searchable_text(product)
-    if product_norm and haystack:
-        score += difflib.SequenceMatcher(None, product_norm[:120], haystack[:240]).ratio() * 4
+    product_norms = [searchable_text(alias) for alias in alias_names if alias]
+    if product_norms and haystack:
+        score += max(difflib.SequenceMatcher(None, product_norm[:120], haystack[:240]).ratio() for product_norm in product_norms) * 4
+    color = generic_color_name(product)
+    if color and searchable_text(color) in haystack:
+        score += 2
     return score
 
 
@@ -1847,13 +2014,13 @@ def candidate_urls(barcode: str, product: str) -> list[str]:
     strong_static_candidates = any(
         exact_product_url(url, clean_product) or product_detail_bonus(url) >= 6 for url in candidates
     )
-    if not strong_static_candidates:
-        for query in fuzzy_queries(barcode, clean_product)[:12]:
-            for result in search_web(query):
-                url = result["url"]
-                score = fuzzy_source_score(url, result.get("title", ""), barcode, clean_product)
-                if score >= 7 or exact_product_url(url, clean_product):
-                    scored.append((score, url))
+    search_limit = 12 if strong_static_candidates else 30
+    for query in fuzzy_queries(barcode, clean_product)[:search_limit]:
+        for result in search_web(query):
+            url = result["url"]
+            score = fuzzy_source_score(url, result.get("title", ""), barcode, clean_product)
+            if score >= 7 or exact_product_url(url, clean_product):
+                scored.append((score, url))
 
     deduped: list[str] = []
     seen = set()
