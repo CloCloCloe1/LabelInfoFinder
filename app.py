@@ -116,6 +116,22 @@ KNOWN_ONLINE_PRODUCTS = {
     },
 }
 
+JUDYDOLL_LIQUID_BLUSH_SERUM = {
+    "source_url": (
+        "https://www.yesstyle.com/en/judydoll-liquid-blush-serum-4-colors-01-fig-5g/info.html/pid.1136648925\n"
+        "https://judydoll.com/products/liquid-blush-serum"
+    ),
+    "net weight": "Net. 5 g",
+    "coo": "Made In China / Fabriqué En Chine",
+    "source_direction": "Lightly dab after foundation and before setting powder, then blend evenly across cheeks.",
+    "shades": {
+        "01-fig": "water, CI 77891, cyclopentasiloxane, isododecane, diisopropyl sebacate, butylene glycol, lauryl PEG-10 tri(trimethylsiloxy) silane, 1,2-pentanediol, diphenylmethoxy silane, trimethylsilyl silicate, CI 77019, polydimethylsiloxane, cyclohexasiloxane, squalane, cetearyl PEG/PPG-10/1 polydimethylsiloxane, polymethyl methacrylate, distearyldimonium lithium montmorillonite, magnesium sulfate, phenoxyethanol, polydimethylsiloxane/vinylpolydimethylsiloxane crosspolymer, polyhydroxystearic acid, HDI/trihydroxymethyl hexyl lactone crosspolymer, CI 77491, aluminum hydroxide, triethoxy octylsilane, CI 77492, polydimethylsiloxane crosspolymer, ethylhexylglycerin, vinylpolydimethylsiloxane/polymethylsilsesquioxane crosspolymer, disodium ethylenediaminetetraacetate, CI 73360, CI 77499, silica, glycerin, 1,3-propanediol, tocopherol (vitamin E), pentaerythrityl tetra(butylated hydroxytoluene) ester, collagen, PPG-13-decyloleate-24, 1,2-hexanediol, acetyl hexapeptide-8, palmitoyl pentapeptide-4",
+        "02-pink-milk": "water, CI 77891, cyclopentasiloxane, isododecane, diisopropyl sebacate, butylene glycol, lauryl PEG-10 tri(trimethylsiloxy) silane, 1,2-pentanediol, diphenylmethoxy silane, trimethylsilyl silicate, polydimethylsiloxane, cyclohexasiloxane, squalane, cetearyl PEG/PPG-10/1 polydimethylsiloxane, polymethyl methacrylate, distearyldimonium lithium montmorillonite, magnesium sulfate, phenoxyethanol, CI 77019, polydimethylsiloxane/vinylpolydimethylsiloxane crosspolymer, polyhydroxystearic acid, HDI/trihydroxymethyl hexyl lactone crosspolymer, CI 77492, aluminum hydroxide, CI 77007, triethoxy octylsilane, polydimethylsiloxane crosspolymer, ethylhexylglycerin, vinylpolydimethylsiloxane/polymethylsilsesquioxane crosspolymer, CI 73360, CI 77499, disodium ethylenediaminetetraacetate, silica, glycerin, 1,3-propanediol, tocopherol (vitamin E), pentaerythrityl tetra(butylated hydroxytoluene) ester, collagen, PPG-13-decyloleate-24, 1,2-hexanediol, acetyl hexapeptide-8, palmitoyl pentapeptide-4",
+        "03-salmon": "water, CI 77891, cyclopentasiloxane, isododecane, diisopropyl sebacate, butylene glycol, lauryl PEG-10 tri(trimethylsiloxy) silane, 1,2-pentanediol, diphenylmethoxy silane, trimethylsilyl silicate, polydimethylsiloxane, CI 77019, cyclohexasiloxane, squalane, cetearyl PEG/PPG-10/1 polydimethylsiloxane, polymethyl methacrylate, CI 77491, distearyldimonium lithium montmorillonite, magnesium sulfate, phenoxyethanol, polydimethylsiloxane/vinylpolydimethylsiloxane crosspolymer, polyhydroxystearic acid, HDI/trihydroxymethyl hexyl lactone crosspolymer, CI 77492, aluminum hydroxide, triethoxy octylsilane, polydimethylsiloxane crosspolymer, ethylhexylglycerin, vinylpolydimethylsiloxane/polymethylsilsesquioxane crosspolymer, CI 77499, CI 73360, disodium ethylenediaminetetraacetate, silica, glycerin, 1,3-propanediol, tocopherol (vitamin E), pentaerythrityl tetra(butylated hydroxytoluene) ester, collagen, PPG-13-decyloleate-24, 1,2-hexanediol, acetyl hexapeptide-8, palmitoyl pentapeptide-4",
+        "04-rosewood": "water, cyclopentasiloxane, CI 77019, isododecane, diisopropyl sebacate, CI 77891, butylene glycol, lauryl PEG-10 tri(trimethylsiloxy) silane, 1,2-pentanediol, diphenylmethoxy silane, trimethylsilyl silicate, polydimethylsiloxane, cyclohexasiloxane, squalane, cetearyl PEG/PPG-10/1 polydimethylsiloxane, polymethyl methacrylate, distearyldimonium lithium montmorillonite, magnesium sulfate, phenoxyethanol, polydimethylsiloxane/vinylpolydimethylsiloxane crosspolymer, polyhydroxystearic acid, HDI/trihydroxymethyl hexyl lactone crosspolymer, CI 77491, triethoxy octylsilane, CI 77492, CI 73360, CI 77007, CI 77499, aluminum hydroxide, polydimethylsiloxane crosspolymer, ethylhexylglycerin, vinylpolydimethylsiloxane/polymethylsilsesquioxane crosspolymer, disodium ethylenediaminetetraacetate, silica, glycerin, 1,3-propanediol, tocopherol (vitamin E), pentaerythrityl tetra(butylated hydroxytoluene) ester, collagen, PPG-13-decyloleate-24, 1,2-hexanediol, acetyl hexapeptide-8, palmitoyl pentapeptide-4",
+    },
+}
+
 
 def ensure_dirs() -> None:
     DATA_DIR.mkdir(exist_ok=True)
@@ -1212,6 +1228,17 @@ def known_product_fallback(barcode: str, product: str) -> dict[str, str]:
         return KNOWN_ONLINE_PRODUCTS["1126245093"]
     if "into" in clean and "six" in clean and "blush" in clean and "palette" in clean:
         return KNOWN_ONLINE_PRODUCTS["1137202898"]
+    if "judydoll" in clean and "liquid" in clean and "blush" in clean:
+        shade = shade_key(product)
+        ingredients = JUDYDOLL_LIQUID_BLUSH_SERUM["shades"].get(shade)
+        if ingredients:
+            return {
+                "source_url": JUDYDOLL_LIQUID_BLUSH_SERUM["source_url"],
+                "net weight": JUDYDOLL_LIQUID_BLUSH_SERUM["net weight"],
+                "source_direction": JUDYDOLL_LIQUID_BLUSH_SERUM["source_direction"],
+                "coo": JUDYDOLL_LIQUID_BLUSH_SERUM["coo"],
+                "ingredients": ingredients,
+            }
     return {}
 
 
