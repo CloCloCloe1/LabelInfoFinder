@@ -80,6 +80,11 @@ SHARED_FAMILY_FIELDS = [
 ]
 
 TRUSTED_DOMAINS = [
+    "smiski.com",
+    "smiskifigures.com",
+    "littleobsessed.com",
+    "japanla.com",
+    "shumistore.com",
     "msh-labo.com",
     "samurai-drugstore.jp",
     "suzykirei.com",
@@ -222,6 +227,10 @@ PRODUCT_ABBREVIATIONS = {
 }
 
 PRODUCT_PHRASE_ALIASES = {
+    "mini glow figures": "Mini Glow in the Dark Figure Blind Box",
+    "mini glow figure": "Mini Glow in the Dark Figure Blind Box",
+    "glow figures": "Glow in the Dark Figure",
+    "glow figure": "Glow in the Dark Figure",
     "creamfit": "Cream Fit",
     "cream fit": "Cream Fit",
     "slimoval": "Ultra Slim",
@@ -234,7 +243,66 @@ PRODUCT_PHRASE_ALIASES = {
     "lip&cheek": "Lip Cheek",
 }
 
+COUNT_ITEM_TERMS = [
+    "figure",
+    "figures",
+    "figurine",
+    "figurines",
+    "blind box",
+    "mystery box",
+    "random style",
+    "random figure",
+    "collectible",
+    "toy",
+    "brush",
+    "applicator",
+    "puff",
+    "sponge",
+    "lash curler",
+    "eyelash curler",
+    "tweezer",
+    "sharpener",
+    "mirror",
+    "case",
+    "pouch",
+    "keyring",
+    "keychain",
+    "charm",
+]
+
+COLLECTIBLE_TERMS = [
+    "figure",
+    "figures",
+    "figurine",
+    "figurines",
+    "blind box",
+    "mystery box",
+    "random style",
+    "random figure",
+    "collectible",
+    "toy",
+    "smiski",
+]
+
+TOOL_ITEM_TERMS = [
+    "brush",
+    "applicator",
+    "puff",
+    "sponge",
+    "lash curler",
+    "eyelash curler",
+    "tweezer",
+    "sharpener",
+    "mirror",
+]
+
 BRAND_ALIAS_RULES = [
+    {
+        "keywords": ("smiski",),
+        "patterns": [r"\bsmiski\b", r"\bdreams\s*smiski\b"],
+        "aliases": ["Smiski", "Dreams Smiski", "SMISKI"],
+        "domains": ["smiski.com", "smiskifigures.com", "littleobsessed.com", "japanla.com", "shumistore.com"],
+    },
     {
         "keywords": ("love", "liner"),
         "patterns": [
@@ -280,6 +348,16 @@ BRAND_ALIAS_RULES = [
 ]
 
 PRODUCT_NAME_FR_PHRASES = {
+    "Mini Glow in the Dark Figure Blind Box": "mini figurine phosphorescente en boîte surprise",
+    "Mini Glow Figure Blind Box": "mini figurine phosphorescente en boîte surprise",
+    "Mini Glow Figures": "mini figurines phosphorescentes",
+    "Mini Glow Figure": "mini figurine phosphorescente",
+    "Glow in the Dark Figure": "figurine phosphorescente",
+    "Glow in the Dark Figures": "figurines phosphorescentes",
+    "Bath Series": "série bain",
+    "Blind Box": "boîte surprise",
+    "Mystery Box": "boîte mystère",
+    "Random Style": "modèle aléatoire",
     "Airy Lip Cheek Mud": "baume mat aérien lèvres et joues",
     "Airy Lip & Cheek Mud": "baume mat aérien lèvres et joues",
     "Lip Cheek Glowy Jelly Pot": "pot gelée éclat lèvres et joues",
@@ -318,8 +396,24 @@ PRODUCT_NAME_FR_PHRASES = {
     "Ultra Slim": "ultra fin",
     "SlimOval": "ovale ultra fin",
     "Slim Oval": "ovale ultra fin",
+    "Lash Curler": "recourbe-cils",
+    "Eyelash Curler": "recourbe-cils",
+    "Silicone Brush": "pinceau en silicone",
+    "Jumbo Brush": "pinceau jumbo",
+    "Brush": "pinceau",
+    "Applicator": "applicateur",
+    "Puff": "houppette",
+    "Sponge": "éponge",
+    "Tweezer": "pince à épiler",
+    "Sharpener": "taille-crayon",
+    "Mirror": "miroir",
     "PENDANT KEYRING": "porte-clés pendentif",
     "KEYRING": "porte-clés",
+    "Figure": "figurine",
+    "Figures": "figurines",
+    "Glow": "phosphorescent",
+    "Bath": "bain",
+    "Mini": "mini",
     "Lip": "lèvres",
     "Cheek": "joues",
 }
@@ -884,6 +978,87 @@ def net_weight_from_text(text: str) -> str | None:
     return None
 
 
+def pcs_count_from_text(product: str, text: str = "") -> str | None:
+    source = searchable_text(f"{product} {text}")
+    match = re.search(r"\b(\d{1,2})\s*(?:pcs|pc|pieces|piece|packs|pack|count|ct)\b", source)
+    if match:
+        return f"Net. {int(match.group(1))} PCS"
+    if is_count_based_item(product, text):
+        return "Net. 1 PCS"
+    return None
+
+
+def material_from_text(text: str) -> str | None:
+    if not text:
+        return None
+    patterns = [
+        r"(?:material|materials|made\s+of|made\s+from)\s*[:：]?\s*([A-Za-z0-9, /+\-().]{3,140})",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.I)
+        if match:
+            raw = re.split(
+                r"\b(?:size|weight|dimensions?|package|country|made in|warning|caution|description|shipping)\b",
+                match.group(1),
+                maxsplit=1,
+                flags=re.I,
+            )[0]
+            material = normalize_material_text(raw)
+            if material:
+                return material
+    material_terms = [
+        ("ATBC-PVC", r"\bATBC[-\s]?PVC\b"),
+        ("PVC", r"\bPVC\b"),
+        ("ABS", r"\bABS\b"),
+        ("PBT", r"\bPBT\b"),
+        ("Nylon", r"\bNylon\b"),
+        ("Silicone", r"\bSilicone\b"),
+        ("Polyester", r"\bPolyester\b"),
+        ("Stainless Steel", r"\bStainless\s+Steel\b"),
+        ("Plastic", r"\bPlastic\b"),
+    ]
+    for label, pattern in material_terms:
+        if re.search(pattern, text, flags=re.I):
+            return label
+    return None
+
+
+def normalize_material_text(material: str) -> str | None:
+    material = html.unescape(str(material or ""))
+    material = re.sub(r"<[^>]+>", " ", material)
+    material = re.sub(r"\s+", " ", material).strip(" .;:-")
+    if not material or len(material) < 3:
+        return None
+    low = material.lower()
+    if "atbc" in low and "pvc" in low:
+        return "ATBC-PVC"
+    replacements = {
+        "pvc": "PVC",
+        "abs": "ABS",
+        "pbt": "PBT",
+    }
+    parts = [part.strip(" .;:-") for part in re.split(r",|/|\+", material) if part.strip(" .;:-")]
+    cleaned = []
+    for part in parts[:6]:
+        normalized = replacements.get(part.lower(), part)
+        cleaned.append(normalized)
+    return ", ".join(dict.fromkeys(cleaned)) if cleaned else None
+
+
+def material_label_from_text(product: str, text: str = "") -> str | None:
+    if not is_count_based_item(product, text):
+        return None
+    material = material_from_text(text)
+    if not material:
+        return None
+    return f"MATERIAL/MATÉRIAU: {material}"
+
+
+def is_material_label(value: str) -> bool:
+    clean = searchable_text(value)
+    return clean.startswith("material materiau") or clean.startswith("material")
+
+
 def coo_from_text(text: str) -> str | None:
     country_map = {
         "korea": "Made In Korea / Fabriqué En Corée",
@@ -1246,7 +1421,8 @@ def how_to_use_from_text(text: str) -> str | None:
 
 
 def product_name_fr(product: str) -> str:
-    clean = normalize_product_name(product)
+    clean = expand_product_abbreviations(normalize_product_name(product))
+    clean = re.sub(r"^\d{5,14}\s+", "", clean)
     if is_love_liner_liquid_eyeliner(clean):
         color = ""
         if love_liner_color(clean):
@@ -1259,6 +1435,8 @@ def product_name_fr(product: str) -> str:
             color = " " + SHADE_FR_TERMS.get(love_liner_color(clean), love_liner_color(clean))
         return f"Love Liner crayon pour les yeux Cream Fit R{variant}{color}".strip()
     result = translate_product_terms(clean)
+    if "smiski" in searchable_text(clean):
+        result = re.sub(r"\bbain\b", "série bain", result, flags=re.I)
     result = re.sub(r"(\d+(?:\.\d+)?)\s*g\b", r"\1 g", result, flags=re.I)
     result = re.sub(r"(\d+(?:\.\d+)?)\s*ml\b", r"\1 mL", result, flags=re.I)
     result = re.sub(r"\s*\+\s*", " + ", result)
@@ -1296,6 +1474,17 @@ def french_name_needs_translation(value: str) -> bool:
         "highlighter",
         "pencil",
         "eyeliner",
+        "figure",
+        "figures",
+        "blind box",
+        "mystery box",
+        "random style",
+        "brush",
+        "applicator",
+        "sponge",
+        "puff",
+        "glow",
+        "bath",
     ]
     return any(term in clean for term in english_terms)
 
@@ -1312,6 +1501,32 @@ def searchable_text(value: str) -> str:
     text = normalize_product_name(value).lower()
     text = re.sub(r"[\-_()/|]+", " ", text)
     return re.sub(r"\s+", " ", text).strip()
+
+
+def contains_search_term(value: str, term: str) -> bool:
+    clean = searchable_text(value)
+    escaped = re.escape(term.lower()).replace(r"\ ", r"\s+")
+    return bool(re.search(rf"(?<![a-z0-9]){escaped}(?![a-z0-9])", clean))
+
+
+def contains_any_search_term(value: str, terms: list[str]) -> bool:
+    return any(contains_search_term(value, term) for term in terms)
+
+
+def is_count_based_item(product: str, source_text: str = "") -> bool:
+    if contains_any_search_term(product, COUNT_ITEM_TERMS):
+        return True
+    return bool(source_text and contains_any_search_term(source_text, COLLECTIBLE_TERMS))
+
+
+def is_collectible_item(product: str, source_text: str = "") -> bool:
+    if contains_any_search_term(product, COLLECTIBLE_TERMS):
+        return True
+    return bool(source_text and contains_any_search_term(source_text, COLLECTIBLE_TERMS))
+
+
+def is_tool_item(product: str, source_text: str = "") -> bool:
+    return contains_any_search_term(product, TOOL_ITEM_TERMS)
 
 
 def expand_product_abbreviations(product: str) -> str:
@@ -1525,6 +1740,8 @@ def cacheable_family_key(product: str) -> str:
         "fwee",
         "romand",
         "peripera",
+        "smiski",
+        "dreams",
     }
     category_tokens = {
         "lip",
@@ -1544,6 +1761,19 @@ def cacheable_family_key(product: str) -> str:
         "mascara",
         "liner",
         "eyeliner",
+        "figure",
+        "figures",
+        "figurine",
+        "figurines",
+        "blind",
+        "box",
+        "mystery",
+        "random",
+        "brush",
+        "applicator",
+        "sponge",
+        "puff",
+        "tool",
     }
     series_tokens = [token for token in tokens if token not in brand_tokens and token not in category_tokens]
     return family if series_tokens else ""
@@ -1587,6 +1817,15 @@ def fuzzy_queries(barcode: str, product: str) -> list[str]:
         f"{core} site:yesstyle.com",
         f"{core} site:oliveyoung.com",
     ]
+    if is_count_based_item(clean_product):
+        queries.extend(
+            [
+                f"{search_basis} blind box 1 pack",
+                f"{search_basis} random style",
+                f"{search_basis} material",
+                f"{search_basis} official",
+            ]
+        )
     for domain in brand_domains[:5]:
         queries.append(f"{core} site:{domain}")
     for alias in aliases[1:]:
@@ -1658,6 +1897,10 @@ def fuzzy_source_score(url: str, title_or_text: str, barcode: str, product: str)
         score += 2
     if "net weight" in haystack or re.search(r"\b\d+(?:\.\d+)?\s*(g|ml)\b", haystack):
         score += 1.5
+    if is_count_based_item(product) and (
+        "blind box" in haystack or "random style" in haystack or "1 pack" in haystack or "figure" in haystack
+    ):
+        score += 2
     product_norms = [searchable_text(alias) for alias in alias_names if alias]
     if product_norms and haystack:
         score += max(difflib.SequenceMatcher(None, product_norm[:120], haystack[:240]).ratio() for product_norm in product_norms) * 4
@@ -1667,9 +1910,25 @@ def fuzzy_source_score(url: str, title_or_text: str, barcode: str, product: str)
     return score
 
 
-def direction_for_product(product: str, source_direction: str | None) -> tuple[str, str]:
-    low = product.lower()
-    if "blush serum" in low or ("liquid" in low and "blush" in low):
+def direction_for_product(product: str, source_direction: str | None, source_text: str = "") -> tuple[str, str]:
+    low = searchable_text(f"{product} {source_text}")
+    if is_collectible_item(product, source_text):
+        if "glow" in low or "dark" in low or "smiski" in low:
+            en = (
+                "DIRECTION FOR USE: Open the blind box and display the figure as desired. "
+                "Expose to light to activate the glow-in-the-dark effect."
+            )
+            fr = (
+                "MODE D’EMPLOI: Ouvrir la boîte surprise et exposer la figurine selon vos préférences. "
+                "L’exposer à la lumière pour activer l’effet phosphorescent."
+            )
+        else:
+            en = "DIRECTION FOR USE: Open the package and display the item as desired."
+            fr = "MODE D’EMPLOI: Ouvrir l’emballage et exposer l’article selon vos préférences."
+    elif is_tool_item(product, source_text):
+        en = "DIRECTION FOR USE: Use the tool to apply, blend, or groom as needed. Clean regularly and allow to dry."
+        fr = "MODE D’EMPLOI: Utiliser l’outil pour appliquer, estomper ou soigner au besoin. Nettoyer régulièrement et laisser sécher."
+    elif "blush serum" in low or ("liquid" in low and "blush" in low):
         en = "DIRECTION FOR USE: Lightly dab after foundation and before setting powder. Tap and blend evenly across cheeks."
         fr = "MODE D’EMPLOI: Tapoter légèrement après le fond de teint et avant la poudre fixatrice. Estomper uniformément sur les joues."
     elif "highlighter" in low:
@@ -1693,7 +1952,7 @@ def direction_for_product(product: str, source_direction: str | None) -> tuple[s
     else:
         en = "DIRECTION FOR USE: Apply a proper amount to the desired area. Use as directed."
         fr = "MODE D’EMPLOI: Appliquer une quantité appropriée sur la zone souhaitée. Utiliser selon le mode d’emploi."
-    if source_direction and "refriger" in source_direction.lower():
+    if source_direction and not is_count_based_item(product, source_text) and "refriger" in source_direction.lower():
         en = (
             "DIRECTION FOR USE: Apply a small amount directly to lips. Store below 25°C "
             "and refrigerate if the product softens."
@@ -1709,8 +1968,27 @@ def default_cautions() -> tuple[str, str]:
     return DEFAULT_CAUTION_EN, DEFAULT_CAUTION_FR
 
 
+def cautions_for_product(product: str, source_text: str = "") -> tuple[str, str]:
+    if is_collectible_item(product, source_text):
+        return (
+            "CAUTIONS: Choking hazard. Small parts. Not for children under 3 years. "
+            "For decorative use only. Keep away from heat and flame.",
+            "MISES EN GARDE: Risque d’étouffement. Petites pièces. Ne convient pas aux enfants de moins de 3 ans. "
+            "À usage décoratif seulement. Tenir à l’écart de la chaleur et des flammes.",
+        )
+    if is_tool_item(product, source_text):
+        return (
+            "CAUTIONS: Keep clean and dry. Do not use on irritated or damaged skin. Keep out of reach of children.",
+            "MISES EN GARDE: Garder propre et sec. Ne pas utiliser sur une peau irritée ou abîmée. "
+            "Garder hors de la portée des enfants.",
+        )
+    return default_cautions()
+
+
 def check_hotlist(ingredients: str) -> tuple[list[str], str]:
     if not ingredients or ingredients == "need to review":
+        return [], ""
+    if is_material_label(ingredients):
         return [], ""
     text = hotlist_text().lower()
     if not text:
@@ -1851,7 +2129,8 @@ def repair_label_values(values: dict[str, str]) -> dict[str, str]:
     repaired = {key: repair_french_text(value) for key, value in values.items()}
     for key, value in list(repaired.items()):
         if key.lower().startswith("ingredients/") and value not in (None, "", "need to review"):
-            repaired[key] = ingredients_label(value)
+            if not is_material_label(value):
+                repaired[key] = ingredients_label(value)
     return repaired
 
 
@@ -1987,6 +2266,26 @@ def candidate_urls(barcode: str, product: str) -> list[str]:
         )
     if "fwee" in clean_lookup and "silicone" in clean_lookup and ("jumbo" in clean_lookup or "applicator" in clean_lookup):
         candidates.append("https://fwee.us/products/jumbo-silicone-jumbo-makeup-applicator")
+    if "smiski" in clean_lookup:
+        if "bath" in clean_lookup:
+            candidates.extend(
+                [
+                    "https://smiski.com/e/products/bath/",
+                    "https://www.smiskifigures.com/product/smiski-bath-series/",
+                    "https://www.littleobsessed.com/smiski-bath-series-blind-box.html",
+                    "https://www.japanla.com/products/smiski-bath-series-blind-box",
+                    "https://shumistore.com/products/smiski-bath-series-blind-box",
+                ]
+            )
+        elif "figure" in clean_lookup or "blind" in clean_lookup:
+            candidates.extend(
+                [
+                    "https://smiski.com/e/products/",
+                    "https://www.smiskifigures.com/",
+                    "https://www.littleobsessed.com/search?q=smiski",
+                    "https://www.japanla.com/search?q=smiski",
+                ]
+            )
     if is_love_liner_cream_fit(clean_product):
         candidates.extend(
             [
@@ -2082,10 +2381,16 @@ def enough_product_data(texts: list[tuple[str, str]], product: str, known: dict[
     if len(texts) < 2:
         return False
     combined = " ".join(text for _url, text in texts)
-    has_net = bool(net_weight_from_text(combined) or known.get("net weight") or net_weight_from_name(product))
+    has_net = bool(
+        net_weight_from_text(combined)
+        or known.get("net weight")
+        or net_weight_from_name(product)
+        or pcs_count_from_text(product, combined)
+    )
     has_ingredients = bool(
         ingredients_from_text(combined, product)
         or (ingredients_label_from_known(known) != "need to review")
+        or material_label_from_text(product, combined)
     )
     return has_net and has_ingredients
 
@@ -2228,14 +2533,16 @@ def process_row(
 
     combined_text = " ".join(text for _url, text in texts)
     source_direction = how_to_use_from_text(combined_text) or known.get("source_direction")
-    direction_en, direction_fr = direction_for_product(product, source_direction)
-    caution_en, caution_fr = default_cautions()
+    direction_en, direction_fr = direction_for_product(product, source_direction, combined_text)
+    caution_en, caution_fr = cautions_for_product(product, combined_text)
+    count_net_weight = pcs_count_from_text(product, combined_text)
 
     values["product name french"] = product_name_fr(product)
     values["net weight"] = (
-        net_weight_from_text(combined_text)
-        or known.get("net weight")
+        known.get("net weight")
         or net_weight_from_name(product)
+        or count_net_weight
+        or net_weight_from_text(combined_text)
         or "need to review"
     )
     values["direction for use"] = direction_en
@@ -2246,6 +2553,7 @@ def process_row(
     values["ingredients/ingrédients"] = (
         ingredients_from_text(combined_text, product)
         or ingredients_label_from_known(known)
+        or material_label_from_text(product, combined_text)
         or "need to review"
     )
     values["coo"] = coo_from_text(combined_text + " " + product) or known.get("coo") or "need to review"
