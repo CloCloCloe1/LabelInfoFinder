@@ -2619,6 +2619,17 @@ def full_dataframe_from_sheet(ws: openpyxl.worksheet.worksheet.Worksheet) -> pd.
     return pd.DataFrame(data[1:], columns=headers).fillna("")
 
 
+def need_review_cell_css(value: Any) -> str:
+    return "background-color: #fff2cc" if is_need_review_value(value) else ""
+
+
+def highlighted_review_dataframe(df: pd.DataFrame) -> Any:
+    styler = df.style
+    if hasattr(styler, "map"):
+        return styler.map(need_review_cell_css)
+    return styler.applymap(need_review_cell_css)
+
+
 def apply_dataframe_to_sheet(
     wb_path: Path,
     sheet_name: str,
@@ -2868,7 +2879,11 @@ def excel_workbook_section() -> None:
 
     if "report" in st.session_state:
         st.subheader("Row status")
-        st.dataframe(st.session_state.report, use_container_width=True, hide_index=True)
+        st.dataframe(
+            highlighted_review_dataframe(st.session_state.report),
+            use_container_width=True,
+            hide_index=True,
+        )
         output_path = Path(st.session_state.output_path)
 
         st.subheader("Manual edit before export")
@@ -2938,6 +2953,13 @@ def direct_search_section() -> None:
 
     if "direct_results" in st.session_state:
         st.subheader("Search results")
+        st.dataframe(
+            highlighted_review_dataframe(st.session_state.direct_results),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        st.subheader("Manual edit before export")
         edited_df = st.data_editor(
             st.session_state.direct_results,
             use_container_width=True,
