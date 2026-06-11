@@ -234,6 +234,10 @@ PRODUCT_PHRASE_ALIASES = {
     "mini glow figure": "Mini Glow in the Dark Figure Blind Box",
     "glow figures": "Glow in the Dark Figure",
     "glow figure": "Glow in the Dark Figure",
+    "mini shero lip mud": "Shero Super Matte Lip Cheek Mud",
+    "shero lip mud": "Shero Super Matte Lip Cheek Mud",
+    "shero super matte lip mud": "Shero Super Matte Lip Cheek Mud",
+    "super matte lip mud": "Shero Super Matte Lip Cheek Mud",
     "creamfit": "Cream Fit",
     "cream fit": "Cream Fit",
     "slimoval": "Ultra Slim",
@@ -334,7 +338,7 @@ BRAND_ALIAS_RULES = [
         "keywords": ("into", "you"),
         "patterns": [r"\binto\s*you\b", r"\bity\b"],
         "aliases": ["INTO YOU", "INTO YOU Cosmetics", "ITY"],
-        "domains": ["intoyoucosmetics.com", "yesstyle.com", "asianbeautywholesale.com", "uniquebunny.com"],
+        "domains": ["intoyoucosmetics.com", "yesstyle.com", "asianbeautywholesale.com", "uniquebunny.com", "kiseki.ca"],
     },
     {
         "keywords": ("fwee",),
@@ -363,6 +367,9 @@ PRODUCT_NAME_FR_PHRASES = {
     "Random Style": "modèle aléatoire",
     "Airy Lip Cheek Mud": "baume mat aérien lèvres et joues",
     "Airy Lip & Cheek Mud": "baume mat aérien lèvres et joues",
+    "Shero Super Matte Lip Cheek Mud": "baume mat Shero lèvres et joues",
+    "Shero Super Matte Lip Mud": "baume mat Shero lèvres",
+    "Mini Shero Lip Mud": "mini baume mat Shero lèvres",
     "Lip Cheek Glowy Jelly Pot": "pot gelée éclat lèvres et joues",
     "Lip&Cheek Glowy Jelly Pot": "pot gelée éclat lèvres et joues",
     "Lip & Cheek Glowy Jelly Pot": "pot gelée éclat lèvres et joues",
@@ -2248,6 +2255,17 @@ def candidate_urls(barcode: str, product: str) -> list[str]:
     if "into" in clean_lookup and "airy" in clean_lookup and "lip" in clean_lookup:
         candidates.append("https://www.intoyoucosmetics.com/en-ca/products/airy-lip-mud")
         candidates.append("https://www.uniquebunny.com/fr/products/into-you-airy-lip-cheek-mud")
+    if "into" in clean_lookup and "shero" in clean_lookup and "lip" in clean_lookup and "mud" in clean_lookup:
+        candidates.extend(
+            [
+                "https://www.intoyoucosmetics.com/en-ca/products/into-you-mini-shero-lip-mud-1g-0-03oz",
+                "https://www.uniquebunny.com/fr/products/into-you-shero-super-matte-lip-cheek-mud",
+                "https://www.uniquebunny.com/products/into-you-shero-super-matte-lip-cheek-mud",
+                "https://www.yesstyle.com/en/into-you-shero-super-matte-lip-cheek-mud-canned-9-colors-342-dust/info.html/pid.1126025802",
+                "https://www.asianbeautywholesale.com/en/into-you-shero-super-matte-lip-cheek-mud-canned-9-colors-342-dust/info.html/pid.1126025802",
+                "https://www.kiseki.ca/intoyou-shero-super-matte-lip-cheek-mud-em10.html",
+            ]
+        )
     if "into" in clean_lookup and "six" in clean_lookup and "blush" in clean_lookup:
         candidates.append("https://www.yesstyle.com/en/into-you-six-color-blush-palette-six-color-blush-palette-15g/info.html/pid.1137202898")
     if "judydoll" in clean_lookup and "liquid" in clean_lookup and "blush" in clean_lookup:
@@ -2342,7 +2360,7 @@ def candidate_urls(barcode: str, product: str) -> list[str]:
     strong_static_candidates = any(
         exact_product_url(url, clean_product) or product_detail_bonus(url) >= 6 for url in candidates
     )
-    search_limit = 12 if strong_static_candidates else 30
+    search_limit = 0 if len(candidates) >= 4 and strong_static_candidates else (12 if strong_static_candidates else 30)
     for query in fuzzy_queries(barcode, clean_product)[:search_limit]:
         for result in search_web(query):
             url = result["url"]
