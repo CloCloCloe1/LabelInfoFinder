@@ -29,6 +29,7 @@ BUILTIN_REFERENCE_PATH = APP_DIR / "reference_data.json"
 SITE_NAME = "Lebal Info Finder"
 NEED_REVIEW_FILL = openpyxl.styles.PatternFill("solid", fgColor="FFF2CC")
 NEED_REVIEW_FILL_RGBS = {"FFF2CC", "00FFF2CC", "FFFFF2CC"}
+MAX_SOURCE_URLS = 8
 
 DISTRIBUTOR = (
     "DISTRIBUTED BY / DISTRIBUÉ PAR: Nakama Trading Ltd, Scarborough, "
@@ -2187,7 +2188,7 @@ def reference_source_url(
 
     urls = candidate_urls(barcode, product or reference_values.get("product name", ""))
     if urls:
-        return "\n".join(urls[:4])
+        return format_source_urls(urls)
     return "need to review"
 
 
@@ -2445,6 +2446,20 @@ def source_urls_from_text(source_url: str) -> list[str]:
     return urls
 
 
+def format_source_urls(urls: list[str], limit: int = MAX_SOURCE_URLS) -> str:
+    deduped: list[str] = []
+    seen = set()
+    for url in urls:
+        clean = str(url or "").strip()
+        if not clean or not clean.startswith("http") or clean in seen:
+            continue
+        seen.add(clean)
+        deduped.append(clean)
+        if len(deduped) >= limit:
+            break
+    return "\n".join(deduped)
+
+
 def status_from_values(values: dict[str, str], source_url: str) -> str:
     missing = [
         field
@@ -2492,7 +2507,7 @@ def merge_family_context(existing: dict[str, Any] | None, new: dict[str, Any]) -
         for url in source_urls_from_text(new["source_url"]):
             if url not in existing_urls:
                 existing_urls.append(url)
-        merged["source_url"] = "\n".join(existing_urls[:4])
+        merged["source_url"] = format_source_urls(existing_urls)
     return merged
 
 
@@ -2534,6 +2549,7 @@ def process_row(
 
     known = known_product_fallback(barcode, product)
     texts: list[tuple[str, str]] = []
+    source_candidates: list[str] = source_urls_from_text(known.get("source_url", ""))
     if verified_known_product(known):
         source_url = known["source_url"]
         notes.append("Used verified product data for this shade.")
@@ -2543,6 +2559,7 @@ def process_row(
             notes.append("Reused source URLs from matching product family.")
         else:
             urls = candidate_urls(barcode, product)
+        source_candidates = urls + source_candidates
         for url in urls:
             text = fetch_text(url)
             if len(text) > 200:
@@ -2550,8 +2567,15 @@ def process_row(
                 if enough_product_data(texts, product, known):
                     break
         if texts:
-            source_url = "\n".join(url for url, _text in texts[:4])
+            checked_urls = [url for url, _text in texts]
+            source_url = format_source_urls(checked_urls + source_candidates)
             notes.append("Sources checked: " + ", ".join(domain_from_url(url) for url, _text in texts[:4]))
+            remaining = len(source_urls_from_text(source_url)) - len(checked_urls)
+            if remaining > 0:
+                notes.append("Additional candidate source URLs included for manual review.")
+        elif source_candidates:
+            source_url = format_source_urls(source_candidates)
+            notes.append("Candidate source URLs found; extraction incomplete.")
         else:
             notes.append("No reliable source found.")
 
@@ -2770,13 +2794,13 @@ def process_direct_rows(rows: list[dict[str, str]], use_defaults: bool) -> pd.Da
             "row": idx,
             "barcode": barcode,
             "product name": product,
+            "source url": result.source_url,
+            "row status": result.status,
         }
         for field in REQUIRED_LABEL_FIELDS:
             record[field] = result.values.get(field, "need to review")
         if result.values.get("restricted ingredients"):
             record["restricted ingredients"] = result.values["restricted ingredients"]
-        record["source url"] = result.source_url
-        record["row status"] = result.status
         record["source notes"] = result.notes
         records.append(record)
     return pd.DataFrame(records)
