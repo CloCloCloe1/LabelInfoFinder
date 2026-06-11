@@ -27,6 +27,8 @@ DB_PATH = DATA_DIR / "users.sqlite3"
 BUILTIN_REFERENCE_PATH = APP_DIR / "reference_data.json"
 
 SITE_NAME = "Lebal Info Finder"
+NEED_REVIEW_FILL = openpyxl.styles.PatternFill("solid", fgColor="FFF2CC")
+NEED_REVIEW_FILL_RGBS = {"FFF2CC", "00FFF2CC", "FFFFF2CC"}
 
 DISTRIBUTOR = (
     "DISTRIBUTED BY / DISTRIBUÉ PAR: Nakama Trading Ltd, Scarborough, "
@@ -933,6 +935,32 @@ def copy_cell_style(src: openpyxl.cell.cell.Cell, dst: openpyxl.cell.cell.Cell) 
         dst.number_format = src.number_format
     if src.alignment:
         dst.alignment = copy.copy(src.alignment)
+
+
+def is_need_review_value(value: Any) -> bool:
+    return str(value or "").strip().lower() == "need to review"
+
+
+def has_need_review_fill(cell: openpyxl.cell.cell.Cell) -> bool:
+    fill = cell.fill
+    if fill.fill_type != "solid":
+        return False
+    rgb = str(fill.fgColor.rgb or "").upper()
+    return rgb in NEED_REVIEW_FILL_RGBS
+
+
+def apply_need_review_highlight(cell: openpyxl.cell.cell.Cell, clear_existing: bool = False) -> None:
+    if is_need_review_value(cell.value):
+        cell.fill = copy.copy(NEED_REVIEW_FILL)
+    elif clear_existing and has_need_review_fill(cell):
+        cell.fill = openpyxl.styles.PatternFill(fill_type=None)
+
+
+def highlight_need_review_cells(wb: openpyxl.Workbook) -> None:
+    for ws in wb.worksheets:
+        for row in ws.iter_rows():
+            for cell in row:
+                apply_need_review_highlight(cell)
 
 
 def add_audit_columns(ws: openpyxl.worksheet.worksheet.Worksheet) -> dict[str, int]:
@@ -2611,6 +2639,7 @@ def apply_dataframe_to_sheet(
                 cell.number_format = "@"
             else:
                 cell.value = None if value == "" else value
+            apply_need_review_highlight(cell, clear_existing=True)
     return export_workbook(wb, output_name)
 
 
@@ -2630,6 +2659,7 @@ def export_workbook(wb: openpyxl.Workbook, name: str) -> Path:
     safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", name).strip("_") or "filled_labels.xlsx"
     output = EXPORT_DIR / safe
     normalize_barcode_columns(wb)
+    highlight_need_review_cells(wb)
     wb.save(output)
     return output
 
@@ -2760,6 +2790,7 @@ def dataframe_to_workbook(df: pd.DataFrame, sheet_name: str = "Direct Search") -
                 cell.number_format = "@"
             else:
                 cell.value = None if value == "" else value
+            apply_need_review_highlight(cell, clear_existing=True)
             cell.alignment = openpyxl.styles.Alignment(wrap_text=True, vertical="top")
     for col_idx, header in enumerate(df.columns, start=1):
         header_text = str(header).lower()
