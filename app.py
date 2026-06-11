@@ -2693,6 +2693,94 @@ def process_workbook(
     return wb, pd.DataFrame(records)
 
 
+def direct_input_rows(df: pd.DataFrame) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    for raw in df.to_dict("records"):
+        barcode = normalize_barcode(raw.get("barcode") or raw.get("Barcode"))
+        product = normalize_product_name(raw.get("product name") or raw.get("Product Name") or "")
+        if is_input_row_blank(barcode, product):
+            continue
+        rows.append({"barcode": barcode, "product name": product})
+    return rows
+
+
+def process_direct_rows(rows: list[dict[str, str]], use_defaults: bool) -> pd.DataFrame:
+    records = []
+    family_cache: dict[str, dict[str, Any]] = {}
+    for idx, row in enumerate(rows, start=1):
+        barcode = normalize_barcode(row.get("barcode"))
+        product = normalize_product_name(row.get("product name") or "")
+        reference_values = fill_from_builtin_reference(barcode)
+        family_key = cacheable_family_key(product)
+        family_context = family_cache.get(family_key) if family_key else None
+        result = process_row(
+            {"barcode": barcode, "product name": product},
+            reference_values,
+            use_defaults,
+            family_context,
+        )
+        if family_key:
+            family_cache[family_key] = merge_family_context(
+                family_cache.get(family_key),
+                family_context_from_result(result),
+            )
+
+        record = {
+            "row": idx,
+            "barcode": barcode,
+            "product name": product,
+        }
+        for field in REQUIRED_LABEL_FIELDS:
+            record[field] = result.values.get(field, "need to review")
+        if result.values.get("restricted ingredients"):
+            record["restricted ingredients"] = result.values["restricted ingredients"]
+        record["source url"] = result.source_url
+        record["row status"] = result.status
+        record["source notes"] = result.notes
+        records.append(record)
+    return pd.DataFrame(records)
+
+
+def dataframe_to_workbook(df: pd.DataFrame, sheet_name: str = "Direct Search") -> openpyxl.Workbook:
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = sheet_name[:31]
+    for col_idx, header in enumerate(df.columns, start=1):
+        cell = ws.cell(1, col_idx)
+        cell.value = header
+        cell.font = openpyxl.styles.Font(bold=True)
+        cell.alignment = openpyxl.styles.Alignment(wrap_text=True, vertical="top")
+        cell.fill = openpyxl.styles.PatternFill("solid", fgColor="D9EAF7")
+    for row_idx, row in enumerate(df.itertuples(index=False), start=2):
+        for col_idx, value in enumerate(row, start=1):
+            header = str(df.columns[col_idx - 1]).strip().lower()
+            cell = ws.cell(row_idx, col_idx)
+            if "barcode" in header:
+                cell.value = normalize_barcode(value)
+                cell.number_format = "@"
+            else:
+                cell.value = None if value == "" else value
+            cell.alignment = openpyxl.styles.Alignment(wrap_text=True, vertical="top")
+    for col_idx, header in enumerate(df.columns, start=1):
+        header_text = str(header).lower()
+        if header_text in {"row", "barcode"}:
+            width = 16
+        elif header_text in {"product name", "product name french", "net weight", "row status"}:
+            width = 28
+        elif "source" in header_text or "ingredients" in header_text or "direction" in header_text:
+            width = 54
+        else:
+            width = 34
+        ws.column_dimensions[openpyxl.utils.get_column_letter(col_idx)].width = width
+    ws.freeze_panes = "A2"
+    return wb
+
+
+def export_direct_dataframe(df: pd.DataFrame, output_name: str = "direct_label_info.xlsx") -> Path:
+    wb = dataframe_to_workbook(df)
+    return export_workbook(wb, output_name)
+
+
 def login_screen() -> None:
     st.title(SITE_NAME)
     st.caption("Private workbook processing for bilingual Nakama labels.")
@@ -2708,24 +2796,7 @@ def login_screen() -> None:
         st.error("Invalid username or password.")
 
 
-def main_app() -> None:
-    user = st.session_state.user
-    st.sidebar.write(f"Signed in as **{user['username']}**")
-    if st.sidebar.button("Sign out"):
-        st.session_state.pop("user", None)
-        st.rerun()
-
-    page = st.sidebar.radio(
-        "Navigation",
-        ["Fill labels", "Manage users"] if user["role"] == "admin" else ["Fill labels"],
-    )
-    if page == "Manage users":
-        manage_users()
-        return
-
-    st.title(SITE_NAME)
-    st.caption("Upload an Excel workbook, preview sheets, process rows, edit, and export.")
-
+def excel_workbook_section() -> None:
     uploaded = st.file_uploader("Excel workbook", type=["xlsx"])
     if not uploaded:
         return
@@ -2745,6 +2816,7 @@ def main_app() -> None:
     use_defaults = st.checkbox(
         "Use approved default lip/cheek direction and general cautions when source data is missing",
         value=True,
+        key="workbook_use_defaults",
     )
     limit = st.number_input("Rows to process now (0 = all)", min_value=0, value=0, step=1)
 
@@ -2795,6 +2867,94 @@ def main_app() -> None:
             file_name=output_path.name,
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
+
+
+def direct_search_section() -> None:
+    default_input = pd.DataFrame(
+        [
+            {"barcode": "", "product name": ""},
+            {"barcode": "", "product name": ""},
+        ]
+    )
+    input_df = st.data_editor(
+        default_input,
+        use_container_width=True,
+        hide_index=True,
+        num_rows="dynamic",
+        key="direct_input_editor",
+        column_config={
+            "barcode": st.column_config.TextColumn("Barcode / SKU", width="medium"),
+            "product name": st.column_config.TextColumn("Product Name", width="large"),
+        },
+    )
+    use_defaults = st.checkbox(
+        "Use approved default lip/cheek direction and general cautions when source data is missing",
+        value=True,
+        key="direct_use_defaults",
+    )
+
+    if st.button("Search products", type="primary", key="direct_search_button"):
+        rows = direct_input_rows(input_df)
+        if not rows:
+            st.warning("Enter at least one barcode/SKU or product name.")
+        else:
+            with st.status("Searching product information...", expanded=True) as status:
+                result_df = process_direct_rows(rows, use_defaults)
+                output_path = export_direct_dataframe(result_df)
+                status.update(label="Search complete", state="complete")
+            st.session_state.direct_results = result_df
+            st.session_state.direct_output_path = str(output_path)
+
+    if "direct_results" in st.session_state:
+        st.subheader("Search results")
+        edited_df = st.data_editor(
+            st.session_state.direct_results,
+            use_container_width=True,
+            hide_index=True,
+            num_rows="fixed",
+            key="direct_results_editor",
+        )
+        if st.button("Save edited direct Excel", key="save_direct_results"):
+            output_path = export_direct_dataframe(edited_df, "edited_direct_label_info.xlsx")
+            st.session_state.direct_results = edited_df
+            st.session_state.direct_output_path = str(output_path)
+            st.success("Edited direct Excel saved.")
+
+        output_path = Path(st.session_state.direct_output_path)
+        st.download_button(
+            "Download direct Excel",
+            data=output_path.read_bytes(),
+            file_name=output_path.name,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+
+def main_app() -> None:
+    user = st.session_state.user
+    st.sidebar.write(f"Signed in as **{user['username']}**")
+    if st.sidebar.button("Sign out"):
+        st.session_state.pop("user", None)
+        st.rerun()
+
+    page = st.sidebar.radio(
+        "Navigation",
+        ["Fill labels", "Manage users"] if user["role"] == "admin" else ["Fill labels"],
+    )
+    if page == "Manage users":
+        manage_users()
+        return
+
+    st.title(SITE_NAME)
+    st.caption("Process full workbooks or search one-off missing products.")
+    input_mode = st.radio(
+        "Input method",
+        ["Upload Excel workbook", "Direct product search"],
+        horizontal=True,
+    )
+    if input_mode == "Direct product search":
+        direct_search_section()
+    else:
+        excel_workbook_section()
 
 
 def main() -> None:
