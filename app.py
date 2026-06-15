@@ -32,7 +32,7 @@ SEARCH_CACHE_PATH = DATA_DIR / "search_cache.json"
 SITE_NAME = "Label Info Finder"
 NEED_REVIEW_FILL = openpyxl.styles.PatternFill("solid", fgColor="FFF2CC")
 NEED_REVIEW_FILL_RGBS = {"FFF2CC", "00FFF2CC", "FFFFF2CC"}
-MAX_SOURCE_URLS = 8
+MAX_SOURCE_URLS = 3
 DEFAULT_SEARCH_MODE = "Fast"
 SEARCH_MODES = ["Fast", "Deep"]
 CACHE_LOCK = Lock()
@@ -3263,7 +3263,6 @@ def process_row(
             ingredient_urls = [url for url, text in texts if ingredients_from_text(text, product)]
             source_url = format_source_urls(
                 ingredient_urls + checked_urls + source_candidates,
-                limit=4 if search_mode == "Fast" else MAX_SOURCE_URLS,
             )
             notes.append("Sources checked: " + ", ".join(domain_from_url(url) for url, _text in texts[:4]))
             remaining = len(source_urls_from_text(source_url)) - len(checked_urls)
@@ -3278,6 +3277,7 @@ def process_row(
     if known and not source_url:
         source_url = known.get("source_url", "")
         notes.append("Used approved source URLs for this SKU.")
+    source_url = format_source_urls(source_urls_from_text(source_url))
 
     combined_text = " ".join(text for _url, text in texts)
     source_direction = how_to_use_from_text(combined_text) or known.get("source_direction")
