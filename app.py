@@ -211,11 +211,22 @@ SEARCH_LANGUAGE_HINTS = [
     "ingredients",
     "net weight",
     "how to use",
+    "全成分",
     "成分",
+    "内容量",
     "容量",
+    "使用方法",
     "使い方",
+    "전성분",
     "성분",
+    "용량",
+    "사용법",
 ]
+
+INGREDIENT_HEADING_RE = r"(?:major\s+ingredients?|ingredients?|ingr[eé]dients?|全成分|成分|配合成分|전성분|성분)"
+NET_WEIGHT_HEADING_RE = r"(?:net\s*weight|contents?|capacity|size|内容量|容量|용량|중량)"
+USAGE_HEADING_RE = r"(?:how\s+to\s+use|directions?|usage|使用方法|使い方|ご使用方法|사용법|사용방법)"
+CAUTION_HEADING_RE = r"(?:cautions?|warnings?|注意事項|ご注意|사용\s*시\s*주의사항|주의사항)"
 
 PRODUCT_ABBREVIATIONS = {
     "MBR": "Medium Brown",
@@ -416,8 +427,14 @@ PRODUCT_NAME_FR_PHRASES = {
     "Eye Shadow Palette": "palette de fards à paupières",
     "3D Voluming Gloss": "gloss volumisant 3D",
     "Voluming Gloss": "gloss volumisant",
+    "Mood Recipe Matte Lip Color": "rouge à lèvres mat Mood Recipe",
+    "Matte Lip Color": "rouge à lèvres mat",
+    "Lip Color": "rouge à lèvres",
     "Stay-Fit Lip Tint": "teinte à lèvres tenue longue durée",
     "Stay Fit Lip Tint": "teinte à lèvres tenue longue durée",
+    "Cushion Foundation": "fond de teint coussin",
+    "Sheet Mask": "masque en feuille",
+    "Mild Acidic pH Sheet Mask": "masque en feuille pH doux acide",
     "Rose Obsession": "obsession rose",
     "Glow Lipstick": "rouge à lèvres éclat",
     "Glowing Lipstick": "rouge à lèvres éclat",
@@ -1092,7 +1109,9 @@ def net_weight_from_name(name: str) -> str | None:
 
 def net_weight_from_text(text: str) -> str | None:
     patterns = [
+        rf"{NET_WEIGHT_HEADING_RE}\s*[:：]?\s*(\d+(?:\.\d+)?)\s*(g|gram|grams|ml|mL|ML)\s*(?:/[^x]{{0,20}})?\s*[x×]\s*(\d{{1,3}})",
         r"(\d+(?:\.\d+)?)\s*(g|gram|grams|ml|mL|ML)\s*(?:/[^x]{0,20})?\s*[x×]\s*(\d{1,3})",
+        rf"{NET_WEIGHT_HEADING_RE}\s*[:：]?\s*(\d+(?:\.\d+)?)\s*(g|gram|grams|ml|mL|ML)",
         r"net\s*weight\s*[:：]?\s*(\d+(?:\.\d+)?)\s*(g|gram|grams|ml|mL|ML)",
         r"(\d+(?:\.\d+)?)\s*(g|gram|grams|ml|mL|ML)\s*/\s*0\.",
         r"(\d+(?:\.\d+)?)\s*(g|gram|grams|ml|mL|ML)\b",
@@ -1244,11 +1263,10 @@ def ingredients_from_text(text: str, product: str = "") -> str | None:
         r"ingredient-list-copy|copy find dupes|find dupes|discover better matches|"
         r"key ingredients|ingredients explained|benefits|"
         r"product information|product details|details\s*/|"
-        r"how to use|directions?|mode d’emploi|caution|warning|made in|catalog|sku|size"
+        rf"{USAGE_HEADING_RE}|mode d’emploi|{CAUTION_HEADING_RE}|made in|catalog|sku|size|{NET_WEIGHT_HEADING_RE}"
     )
     patterns = [
-        rf"major\s+ingredients?\s*[:：]?\s*(.{{40,9000}}?)(?={stop_words}|$)",
-        rf"(?:ingredients?|ingr[eé]dients?)\s*[:：]?\s*(.{{40,9000}}?)(?={stop_words}|$)",
+        rf"{INGREDIENT_HEADING_RE}\s*[:：]?\s*(.{{40,9000}}?)(?=\s*(?:{stop_words})|$)",
     ]
     candidates: list[str] = []
     for pattern in patterns:
@@ -1274,7 +1292,7 @@ def ingredients_for_shade(text: str, product: str) -> str | None:
     shade_pattern = shade_regex(product)
     if not shade_pattern:
         return None
-    ingredient_head = r"(?:major\s+ingredients?|ingredients?|ingr[eé]dients?)"
+    ingredient_head = INGREDIENT_HEADING_RE
     next_shade_pattern = r"(?<![-/\w])#?\s*(?:\d{2,3}|[a-z]{1,2}\s*\d{1,3})\s+(?-i:[A-Z][A-Za-z]+)"
     candidates = []
     for head_match in re.finditer(ingredient_head, text, flags=re.I):
@@ -1296,12 +1314,12 @@ def ingredients_for_shade(text: str, product: str) -> str | None:
 
     start_pattern = rf"{ingredient_head}.*?{shade_pattern}\s*[:：]?\s*"
     stop_pattern = (
-        r"(?=(?<![-/\w])#?\s*(?:\d{2,3}|[a-z]{1,2}\s*\d{1,3})\s+(?-i:[A-Z][A-Za-z]+)|"
+        r"(?=\s*(?:(?<![-/\w])#?\s*(?:\d{2,3}|[a-z]{1,2}\s*\d{1,3})\s+(?-i:[A-Z][A-Za-z]+)|"
         r"\bmore\b|this list of ingredients|actual ingredients|ingredients subject|"
         r"ingredient-list-copy|copy find dupes|find dupes|discover better matches|"
         r"key ingredients|ingredients explained|benefits|"
         r"product information|shipping policy|"
-        r"how to use|directions?|caution|warning|made in|$)"
+        rf"{USAGE_HEADING_RE}|{CAUTION_HEADING_RE}|{NET_WEIGHT_HEADING_RE}|made in)|$)"
     )
     for match in re.finditer(start_pattern + rf"(.{{40,3000}}?){stop_pattern}", text, flags=re.I):
         candidate = normalize_ingredients_text(match.group(1))
@@ -1845,7 +1863,7 @@ def manufacturer_from_text(text: str) -> str | None:
 
 def how_to_use_from_text(text: str) -> str | None:
     match = re.search(
-        r"(?:how to use|directions?|usage)\s*[:：]?\s*(.{20,700}?)(?:ingredients?|net weight|official service|shipping|caution|warning|customer|$)",
+        rf"{USAGE_HEADING_RE}\s*[:：]?\s*(.{{20,700}}?)(?:{INGREDIENT_HEADING_RE}|{NET_WEIGHT_HEADING_RE}|official service|shipping|{CAUTION_HEADING_RE}|customer|$)",
         text,
         flags=re.I,
     )
@@ -1975,7 +1993,8 @@ def expand_product_abbreviations(product: str) -> str:
         elif phrase in compact:
             result = re.sub(phrase, replacement, result, flags=re.I)
     for abbr, full in PRODUCT_ABBREVIATIONS.items():
-        result = re.sub(rf"(?<![A-Za-z0-9]){re.escape(abbr)}(?![A-Za-z0-9])", full, result, flags=re.I)
+        prefix_guard = r"(?<![A-Za-z0-9&])" if abbr == "BE" else r"(?<![A-Za-z0-9])"
+        result = re.sub(rf"{prefix_guard}{re.escape(abbr)}(?![A-Za-z0-9])", full, result, flags=re.I)
     return re.sub(r"\s+", " ", result).strip()
 
 
@@ -2321,7 +2340,7 @@ def fuzzy_queries(barcode: str, product: str, search_mode: str = DEFAULT_SEARCH_
             [
                 f"{clean_product} ingredients English",
                 f"{clean_product} 成分 容量",
-                f"{clean_product} 全成分 容量",
+                f"{clean_product} 全成分 内容量",
                 f"{clean_product} 전성분 용량",
             ]
         )
