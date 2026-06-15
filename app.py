@@ -1516,12 +1516,79 @@ def strip_ingredients_label_prefix(ingredients: str) -> str:
 
 
 def english_ingredients_text(ingredients: str | None) -> str:
-    clean = normalize_ingredients_text(strip_ingredients_label_prefix(str(ingredients or "")))
+    clean = extract_clean_ingredient_segment(strip_ingredients_label_prefix(str(ingredients or "")))
     if not clean:
         return ""
     if looks_french_ingredients(clean):
         clean = translate_ingredients(clean, FR_TO_EN_INGREDIENTS)
-    return normalize_ingredients_text(clean)
+    return extract_clean_ingredient_segment(clean)
+
+
+def extract_clean_ingredient_segment(ingredients: str | None) -> str:
+    raw = str(ingredients or "").strip()
+    clean = normalize_ingredients_text(raw)
+    if not clean:
+        clean = ""
+    if valid_ingredient_output(clean):
+        return clean
+
+    candidates = [clean]
+    first_ingredient = re.search(
+        r"\b(?:Aqua|Water|Dimethicone|Silica|Mica|Talc|Glycerin|Butylene Glycol|"
+        r"Polyglyceryl|Isododecane|Cyclopentasiloxane|Titanium Dioxide|Iron Oxides|CI\s*\d{5})\b",
+        raw,
+        flags=re.I,
+    )
+    if first_ingredient:
+        candidates.append(raw[first_ingredient.start():])
+
+    parts = split_ingredients(clean)
+    if len(parts) >= 4:
+        rebuilt: list[str] = []
+        for part in parts:
+            part_clean = trim_non_ingredient_tail(part).strip(" .;,")
+            if not part_clean:
+                break
+            if ingredient_part_looks_dirty(part_clean):
+                break
+            rebuilt.append(part_clean)
+        if len(rebuilt) >= 4:
+            candidates.append(", ".join(rebuilt))
+
+    for candidate in candidates[1:]:
+        normalized = normalize_ingredients_text(candidate)
+        if normalized and valid_ingredient_output(normalized):
+            return normalized
+    return ""
+
+
+def ingredient_part_looks_dirty(part: str) -> bool:
+    low = part.lower()
+    dirty_markers = [
+        "how to use",
+        "direction",
+        "product information",
+        "product details",
+        "description:",
+        "customer review",
+        "add to cart",
+        "shipping",
+        "return policy",
+        "login",
+        "register",
+        "decode inci",
+        "copy",
+        "find dupes",
+        "ingredients explained",
+        "we don't have description",
+        "what-it-does",
+        "also-called",
+        "helper ingredient",
+        "http://",
+        "https://",
+        ".com",
+    ]
+    return any(marker in low for marker in dirty_markers)
 
 
 def clean_ingredients_for_output(ingredients: str | None) -> str:
