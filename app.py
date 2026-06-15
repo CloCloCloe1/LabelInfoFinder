@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from html.parser import HTMLParser
 from pathlib import Path
+from threading import Lock
 from typing import Any
 from urllib.parse import parse_qs, quote_plus, urlencode, unquote, urlparse, urlunparse
 
@@ -26,11 +27,16 @@ DATA_DIR = APP_DIR / "data"
 EXPORT_DIR = APP_DIR / "outputs"
 DB_PATH = DATA_DIR / "users.sqlite3"
 BUILTIN_REFERENCE_PATH = APP_DIR / "reference_data.json"
+SEARCH_CACHE_PATH = DATA_DIR / "search_cache.json"
 
 SITE_NAME = "Label Info Finder"
 NEED_REVIEW_FILL = openpyxl.styles.PatternFill("solid", fgColor="FFF2CC")
 NEED_REVIEW_FILL_RGBS = {"FFF2CC", "00FFF2CC", "FFFFF2CC"}
 MAX_SOURCE_URLS = 8
+DEFAULT_SEARCH_MODE = "Fast"
+SEARCH_MODES = ["Fast", "Deep"]
+CACHE_LOCK = Lock()
+SEARCH_CACHE_VERSION = 2
 
 DISTRIBUTOR = (
     "DISTRIBUTED BY / DISTRIBUÉ PAR: Nakama Trading Ltd, Scarborough, "
@@ -811,7 +817,7 @@ def product_detail_bonus(url: str) -> float:
     domain = parsed.netloc.lower()
     path = parsed.path.lower()
     if "yesstyle.com" in domain and "/info.html" in path and "/pid." in path:
-        return 7.0
+        return 9.0
     if "3cecosmetics.com" in domain and "/all-products/" in path:
         return 7.0
     if "/products/" in path:
@@ -2212,7 +2218,7 @@ def product_brand(product: str) -> str:
     return " ".join(tokens[:2])
 
 
-def fuzzy_queries(barcode: str, product: str) -> list[str]:
+def fuzzy_queries(barcode: str, product: str, search_mode: str = DEFAULT_SEARCH_MODE) -> list[str]:
     clean_product = normalize_product_name(product)
     aliases = expanded_product_names(clean_product)
     search_basis = aliases[1] if len(aliases) > 1 else clean_product
@@ -2222,6 +2228,13 @@ def fuzzy_queries(barcode: str, product: str) -> list[str]:
     core = " ".join(tokens[:6])
     tail = " ".join(tokens[:6])
     brand_domains = brand_domains_for_product(clean_product)
+    if search_mode == "Deep":
+        with CACHE_LOCK:
+            remembered = load_search_cache().get("brands", {}).get(brand, []) if brand else []
+        if isinstance(remembered, list):
+            for domain in remembered:
+                if domain not in brand_domains:
+                    brand_domains.append(domain)
     domain_queries = [f"{core} site:{domain}" for domain in brand_domains[:5] if core]
     queries = [
         f"\"{clean_product}\"",
@@ -2267,6 +2280,8 @@ def fuzzy_queries(barcode: str, product: str) -> list[str]:
         )
         for domain in brand_domains[:5]:
             queries.append(f"{alias} site:{domain}")
+    if search_mode == "Fast":
+        queries = queries[:16]
     if barcode:
         queries[3:3] = [
             f"{barcode} {search_basis}",
@@ -2440,6 +2455,102 @@ class FillResult:
     status: str
     source_url: str
     notes: str
+
+
+def empty_search_cache() -> dict[str, Any]:
+    return {"version": SEARCH_CACHE_VERSION, "products": {}, "families": {}, "brands": {}}
+
+
+def load_search_cache() -> dict[str, Any]:
+    if not SEARCH_CACHE_PATH.exists():
+        return empty_search_cache()
+    try:
+        data = json.loads(SEARCH_CACHE_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return empty_search_cache()
+    if not isinstance(data, dict):
+        return empty_search_cache()
+    if data.get("version") != SEARCH_CACHE_VERSION:
+        return empty_search_cache()
+    for key in ["products", "families", "brands"]:
+        if not isinstance(data.get(key), dict):
+            data[key] = {}
+    return data
+
+
+def save_search_cache(cache: dict[str, Any]) -> None:
+    DATA_DIR.mkdir(exist_ok=True)
+    SEARCH_CACHE_PATH.write_text(json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def product_cache_key(barcode: str, product: str) -> str:
+    barcode = normalize_barcode(barcode)
+    clean = searchable_text(normalize_product_name(product))
+    return f"barcode:{barcode}" if barcode else f"product:{clean}"
+
+
+def cached_fill_result(barcode: str, product: str, use_cache: bool) -> FillResult | None:
+    if not use_cache:
+        return None
+    key = product_cache_key(barcode, product)
+    with CACHE_LOCK:
+        cache = load_search_cache()
+        entry = cache.get("products", {}).get(key)
+    if not isinstance(entry, dict):
+        return None
+    values = repair_label_values(dict(entry.get("values") or {}))
+    ingredients = values.get("ingredients/ingrédients") or values.get("ingredients/ingr茅dients")
+    if ingredients_label(ingredients) == "need to review":
+        return None
+    source_url = str(entry.get("source_url") or "")
+    if source_url_is_missing(source_url):
+        return None
+    return FillResult(values, status_from_values(values, source_url), source_url, "Used cached product result.")
+
+
+def cached_family_context(product: str, use_cache: bool) -> dict[str, Any] | None:
+    if not use_cache:
+        return None
+    family_key = cacheable_family_key(product)
+    if not family_key:
+        return None
+    with CACHE_LOCK:
+        cache = load_search_cache()
+        entry = cache.get("families", {}).get(family_key)
+    return entry if isinstance(entry, dict) else None
+
+
+def update_search_cache(barcode: str, product: str, result: FillResult, use_cache: bool) -> None:
+    if not use_cache or not result or source_url_is_missing(result.source_url):
+        return
+    ingredients = result.values.get("ingredients/ingrédients") or result.values.get("ingredients/ingr茅dients")
+    if ingredients_label(ingredients) == "need to review":
+        return
+    product_key = product_cache_key(barcode, product)
+    family_key = cacheable_family_key(product)
+    brand = product_brand(product)
+    with CACHE_LOCK:
+        cache = load_search_cache()
+        cache["products"][product_key] = {
+            "values": result.values,
+            "source_url": result.source_url,
+            "status": result.status,
+        }
+        if family_key:
+            cache["families"][family_key] = merge_family_context(
+                cache["families"].get(family_key),
+                family_context_from_result(result),
+            )
+        if brand:
+            remembered = cache["brands"].get(brand, [])
+            if not isinstance(remembered, list):
+                remembered = []
+            for url in source_urls_from_text(result.source_url):
+                domain = domain_from_url(url)
+                if domain and domain not in remembered:
+                    remembered.append(domain)
+            cache["brands"][brand] = remembered[:10]
+        save_search_cache(cache)
 
 
 def fill_from_reference(
@@ -2616,7 +2727,12 @@ def clear_generated_row(
             ws.cell(row_idx, col).value = None
 
 
-def candidate_urls(barcode: str, product: str) -> list[str]:
+def candidate_urls(
+    barcode: str,
+    product: str,
+    search_mode: str = DEFAULT_SEARCH_MODE,
+    use_cache: bool = True,
+) -> list[str]:
     clean_product = normalize_product_name(product)
     clean_lookup = " ".join(searchable_text(name) for name in expanded_product_names(clean_product))
     candidates: list[str] = []
@@ -2759,6 +2875,11 @@ def candidate_urls(barcode: str, product: str) -> list[str]:
             ]
         )
 
+    if use_cache:
+        family_entry = cached_family_context(clean_product, True)
+        if family_entry:
+            candidates = source_urls_from_text(family_entry.get("source_url", "")) + candidates
+
     scored: list[tuple[float, str]] = []
     for url in candidates:
         scored.append((fuzzy_source_score(url, url, barcode, clean_product), url))
@@ -2767,15 +2888,19 @@ def candidate_urls(barcode: str, product: str) -> list[str]:
         exact_product_url(url, clean_product) or product_detail_bonus(url) >= 6 for url in candidates
     )
     brand_domains = brand_domains_for_product(clean_product)
-    if len(candidates) >= 4 and strong_static_candidates:
+    if search_mode == "Fast" and strong_static_candidates:
+        search_limit = 0
+    elif len(candidates) >= 4 and strong_static_candidates:
         search_limit = 0
     elif strong_static_candidates:
         search_limit = 8
     elif brand_domains:
-        search_limit = 18
+        search_limit = 8 if search_mode == "Fast" else 18
     else:
-        search_limit = 30
-    for query in fuzzy_queries(barcode, clean_product)[:search_limit]:
+        search_limit = 10 if search_mode == "Fast" else 30
+    if search_mode == "Deep" and len(candidates) >= 4 and strong_static_candidates:
+        search_limit = 8
+    for query in fuzzy_queries(barcode, clean_product, search_mode)[:search_limit]:
         for result in search_web(query):
             url = result["url"]
             score = fuzzy_source_score(url, result.get("title", ""), barcode, clean_product)
@@ -2789,7 +2914,7 @@ def candidate_urls(barcode: str, product: str) -> list[str]:
             continue
         seen.add(url)
         deduped.append(url)
-    return deduped[:10]
+    return deduped[:6 if search_mode == "Fast" else 10]
 
 
 def known_product_fallback(barcode: str, product: str) -> dict[str, str]:
@@ -2894,7 +3019,12 @@ def format_source_urls(urls: list[str], limit: int = MAX_SOURCE_URLS) -> str:
     return "\n".join(deduped)
 
 
-def fetch_source_texts(urls: list[str], product: str, known: dict[str, str]) -> list[tuple[str, str]]:
+def fetch_source_texts(
+    urls: list[str],
+    product: str,
+    known: dict[str, str],
+    search_mode: str = DEFAULT_SEARCH_MODE,
+) -> list[tuple[str, str]]:
     texts: list[tuple[str, str]] = []
     if not urls:
         return texts
@@ -2905,8 +3035,17 @@ def fetch_source_texts(urls: list[str], product: str, known: dict[str, str]) -> 
         if enough_product_data(texts, product, known):
             return texts
 
-    target_urls = [url for url in urls[1: min(6, len(urls))] if url != first_url]
+    max_urls = 3 if search_mode == "Fast" else 6
+    target_urls = [url for url in urls[1: min(max_urls, len(urls))] if url != first_url]
     if not target_urls:
+        return texts
+    if search_mode == "Fast":
+        for url in target_urls:
+            text = fetch_text(url)
+            if len(text) > 200:
+                texts.append((url, text))
+                if enough_product_data(texts, product, known):
+                    break
         return texts
     max_workers = min(4, len(target_urls))
     executor = ThreadPoolExecutor(max_workers=max_workers)
@@ -2986,6 +3125,8 @@ def process_row(
     reference_values: dict[str, str] | None,
     use_defaults: bool,
     family_context: dict[str, Any] | None = None,
+    search_mode: str = DEFAULT_SEARCH_MODE,
+    use_cache: bool = True,
 ) -> FillResult:
     product = str(row.get("product name") or "")
     barcode = normalize_barcode(row.get("barcode"))
@@ -3017,6 +3158,10 @@ def process_row(
             " ".join(notes),
         ), family_context)
 
+    cached = cached_fill_result(barcode, product, use_cache)
+    if cached:
+        return cached
+
     known = known_product_fallback(barcode, product)
     texts: list[tuple[str, str]] = []
     source_candidates: list[str] = source_urls_from_text(known.get("source_url", ""))
@@ -3024,16 +3169,22 @@ def process_row(
         source_url = known["source_url"]
         notes.append("Used verified product data for this shade.")
     else:
+        if not family_context:
+            family_context = cached_family_context(product, use_cache)
         urls = source_urls_from_text(family_context.get("source_url", "")) if family_context else []
         if urls:
             notes.append("Reused source URLs from matching product family.")
         else:
-            urls = candidate_urls(barcode, product)
+            urls = candidate_urls(barcode, product, search_mode, use_cache)
         source_candidates = urls + source_candidates
-        texts = fetch_source_texts(urls, product, known)
+        texts = fetch_source_texts(urls, product, known, search_mode)
         if texts:
             checked_urls = [url for url, _text in texts]
-            source_url = format_source_urls(checked_urls + source_candidates)
+            ingredient_urls = [url for url, text in texts if ingredients_from_text(text, product)]
+            source_url = format_source_urls(
+                ingredient_urls + checked_urls + source_candidates,
+                limit=4 if search_mode == "Fast" else MAX_SOURCE_URLS,
+            )
             notes.append("Sources checked: " + ", ".join(domain_from_url(url) for url, _text in texts[:4]))
             remaining = len(source_urls_from_text(source_url)) - len(checked_urls)
             if remaining > 0:
@@ -3089,7 +3240,9 @@ def process_row(
         notes.append(hotlist_note)
 
     status = status_from_values(values, source_url)
-    return apply_family_context(FillResult(values, status, source_url, " ".join(notes)), family_context)
+    result = apply_family_context(FillResult(values, status, source_url, " ".join(notes)), family_context)
+    update_search_cache(barcode, product, result, use_cache)
+    return result
 
 
 def dataframe_from_sheet(ws: openpyxl.worksheet.worksheet.Worksheet, rows: int = 20) -> pd.DataFrame:
@@ -3168,6 +3321,9 @@ def process_workbook(
     path: Path,
     fill_sheet: str,
     use_defaults: bool,
+    search_mode: str = DEFAULT_SEARCH_MODE,
+    use_cache: bool = True,
+    max_workers: int = 4,
     limit: int | None = None,
 ) -> tuple[openpyxl.Workbook, pd.DataFrame]:
     wb = openpyxl.load_workbook(path)
@@ -3180,7 +3336,7 @@ def process_workbook(
 
     product_col = find_column(fill_headers, "product name")
     records = []
-    family_cache: dict[str, dict[str, Any]] = {}
+    task_groups: dict[str, list[dict[str, Any]]] = {}
     max_row = fill_ws.max_row if limit is None else min(fill_ws.max_row, limit + 1)
     for row_idx in range(2, max_row + 1):
         barcode = normalize_barcode(fill_ws.cell(row_idx, barcode_col).value)
@@ -3190,17 +3346,51 @@ def process_workbook(
             continue
         fill_ws.cell(row_idx, barcode_col).value = barcode
         fill_ws.cell(row_idx, barcode_col).number_format = "@"
-        row = {"barcode": barcode, "product name": product}
-        reference_values = fill_from_builtin_reference(barcode)
         family_key = cacheable_family_key(product)
-        family_context = family_cache.get(family_key) if family_key else None
-        result = process_row(row, reference_values, use_defaults, family_context)
-        if family_key:
-            family_cache[family_key] = merge_family_context(
-                family_cache.get(family_key),
-                family_context_from_result(result),
-            )
+        group_key = family_key or f"row:{row_idx}"
+        task_groups.setdefault(group_key, []).append(
+            {
+                "row_idx": row_idx,
+                "barcode": barcode,
+                "product": product,
+                "family_key": family_key,
+                "reference_values": fill_from_builtin_reference(barcode),
+            }
+        )
 
+    def process_group(group: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        group_results = []
+        family_context = cached_family_context(group[0]["product"], use_cache) if group[0]["family_key"] else None
+        for item in group:
+            result = process_row(
+                {"barcode": item["barcode"], "product name": item["product"]},
+                item["reference_values"],
+                use_defaults,
+                family_context,
+                search_mode,
+                use_cache,
+            )
+            if item["family_key"]:
+                family_context = merge_family_context(family_context, family_context_from_result(result))
+            group_results.append({**item, "result": result})
+        return group_results
+
+    processed_items: list[dict[str, Any]] = []
+    groups = list(task_groups.values())
+    if max_workers <= 1 or len(groups) <= 1:
+        for group in groups:
+            processed_items.extend(process_group(group))
+    else:
+        with ThreadPoolExecutor(max_workers=min(max_workers, len(groups))) as executor:
+            futures = [executor.submit(process_group, group) for group in groups]
+            for future in as_completed(futures):
+                processed_items.extend(future.result())
+
+    for item in sorted(processed_items, key=lambda value: value["row_idx"]):
+        row_idx = item["row_idx"]
+        barcode = item["barcode"]
+        product = item["product"]
+        result = item["result"]
         for header, value in result.values.items():
             col = find_column(fill_headers, header)
             if col and value:
@@ -3234,30 +3424,63 @@ def direct_input_rows(df: pd.DataFrame) -> list[dict[str, str]]:
     return rows
 
 
-def process_direct_rows(rows: list[dict[str, str]], use_defaults: bool) -> pd.DataFrame:
-    records = []
-    family_cache: dict[str, dict[str, Any]] = {}
+def process_direct_rows(
+    rows: list[dict[str, str]],
+    use_defaults: bool,
+    search_mode: str = DEFAULT_SEARCH_MODE,
+    use_cache: bool = True,
+    max_workers: int = 4,
+) -> pd.DataFrame:
+    task_groups: dict[str, list[dict[str, Any]]] = {}
     for idx, row in enumerate(rows, start=1):
         barcode = normalize_barcode(row.get("barcode"))
         product = normalize_product_name(row.get("product name") or "")
-        reference_values = fill_from_builtin_reference(barcode)
         family_key = cacheable_family_key(product)
-        family_context = family_cache.get(family_key) if family_key else None
-        result = process_row(
-            {"barcode": barcode, "product name": product},
-            reference_values,
-            use_defaults,
-            family_context,
+        group_key = family_key or f"row:{idx}"
+        task_groups.setdefault(group_key, []).append(
+            {
+                "idx": idx,
+                "barcode": barcode,
+                "product": product,
+                "family_key": family_key,
+                "reference_values": fill_from_builtin_reference(barcode),
+            }
         )
-        if family_key:
-            family_cache[family_key] = merge_family_context(
-                family_cache.get(family_key),
-                family_context_from_result(result),
-            )
 
+    def process_group(group: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        group_results = []
+        family_context = cached_family_context(group[0]["product"], use_cache) if group[0]["family_key"] else None
+        for item in group:
+            result = process_row(
+                {"barcode": item["barcode"], "product name": item["product"]},
+                item["reference_values"],
+                use_defaults,
+                family_context,
+                search_mode,
+                use_cache,
+            )
+            if item["family_key"]:
+                family_context = merge_family_context(family_context, family_context_from_result(result))
+            group_results.append({**item, "result": result})
+        return group_results
+
+    processed_items: list[dict[str, Any]] = []
+    groups = list(task_groups.values())
+    if max_workers <= 1 or len(groups) <= 1:
+        for group in groups:
+            processed_items.extend(process_group(group))
+    else:
+        with ThreadPoolExecutor(max_workers=min(max_workers, len(groups))) as executor:
+            futures = [executor.submit(process_group, group) for group in groups]
+            for future in as_completed(futures):
+                processed_items.extend(future.result())
+
+    records = []
+    for item in sorted(processed_items, key=lambda value: value["idx"]):
+        result = item["result"]
         record = {
-            "barcode": barcode,
-            "product name": product,
+            "barcode": item["barcode"],
+            "product name": item["product"],
         }
         for field in REQUIRED_LABEL_FIELDS:
             record[field] = result.values.get(field, "need to review")
@@ -3346,14 +3569,38 @@ def excel_workbook_section() -> None:
         value=True,
         key="workbook_use_defaults",
     )
+    search_mode = st.radio(
+        "Search mode",
+        SEARCH_MODES,
+        index=0,
+        horizontal=True,
+        key="workbook_search_mode",
+        help="Fast checks known official/trusted sources first. Deep searches more broadly and is slower.",
+    )
+    use_cache = st.checkbox(
+        "Use saved search cache",
+        value=True,
+        key="workbook_use_cache",
+    )
+    parallel_rows = st.slider(
+        "Parallel product groups",
+        min_value=1,
+        max_value=6,
+        value=4,
+        key="workbook_parallel_rows",
+        help="Higher values can be faster, but too high may trigger website timeouts.",
+    )
     limit = st.number_input("Rows to process now (0 = all)", min_value=0, value=0, step=1)
 
     if st.button("Process workbook", type="primary"):
-        with st.status("Processing rows one by one...", expanded=True) as status:
+        with st.status("Processing product groups...", expanded=True) as status:
             processed_wb, report = process_workbook(
                 path,
                 fill_sheet,
                 use_defaults,
+                search_mode,
+                use_cache,
+                int(parallel_rows),
                 None if limit == 0 else int(limit),
             )
             output_path = export_workbook(processed_wb, f"filled_{uploaded.name}")
@@ -3424,6 +3671,26 @@ def direct_search_section() -> None:
         value=True,
         key="direct_use_defaults",
     )
+    search_mode = st.radio(
+        "Search mode",
+        SEARCH_MODES,
+        index=0,
+        horizontal=True,
+        key="direct_search_mode",
+        help="Fast checks known official/trusted sources first. Deep searches more broadly and is slower.",
+    )
+    use_cache = st.checkbox(
+        "Use saved search cache",
+        value=True,
+        key="direct_use_cache",
+    )
+    parallel_rows = st.slider(
+        "Parallel product groups",
+        min_value=1,
+        max_value=6,
+        value=4,
+        key="direct_parallel_rows",
+    )
 
     if st.button("Search products", type="primary", key="direct_search_button"):
         rows = direct_input_rows(input_df)
@@ -3431,7 +3698,7 @@ def direct_search_section() -> None:
             st.warning("Enter at least one barcode/SKU or product name.")
         else:
             with st.status("Searching product information...", expanded=True) as status:
-                result_df = process_direct_rows(rows, use_defaults)
+                result_df = process_direct_rows(rows, use_defaults, search_mode, use_cache, int(parallel_rows))
                 output_path = export_direct_dataframe(result_df)
                 status.update(label="Search complete", state="complete")
             st.session_state.direct_results = result_df
