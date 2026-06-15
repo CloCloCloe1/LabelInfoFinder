@@ -1,10 +1,10 @@
-# Lebal Info Finder
+# Label Info Finder
 
 Private Streamlit site for filling bilingual Canadian cosmetic label information from an uploaded Excel workbook.
 
 ## Deploy To Streamlit Cloud
 
-1. Create a new private GitHub repository, for example `lebal-info-finder`.
+1. Create a new private GitHub repository, for example `label-info-finder`.
 2. Upload these project files to the repository:
    - `app.py`
    - `requirements.txt`

@@ -26,7 +26,7 @@ EXPORT_DIR = APP_DIR / "outputs"
 DB_PATH = DATA_DIR / "users.sqlite3"
 BUILTIN_REFERENCE_PATH = APP_DIR / "reference_data.json"
 
-SITE_NAME = "Lebal Info Finder"
+SITE_NAME = "Label Info Finder"
 NEED_REVIEW_FILL = openpyxl.styles.PatternFill("solid", fgColor="FFF2CC")
 NEED_REVIEW_FILL_RGBS = {"FFF2CC", "00FFF2CC", "FFFFF2CC"}
 MAX_SOURCE_URLS = 8
