@@ -2983,6 +2983,98 @@ def candidate_urls(
     return deduped[:6 if search_mode == "Fast" else 10]
 
 
+def title_case_product_slug(slug: str) -> str:
+    words = []
+    for word in re.split(r"\s+", slug.strip()):
+        if not word:
+            continue
+        if re.fullmatch(r"[A-Z]{2,}\d{0,3}|[A-Z]{1,3}\d{1,3}|\d+(?:\.\d+)?(?:g|ml|pcs)", word, flags=re.I):
+            words.append(word.upper().replace("ML", "mL"))
+        elif word.lower() in {"ph", "spf", "pa"}:
+            words.append(word.upper())
+        else:
+            words.append(word[:1].upper() + word[1:])
+    return " ".join(words)
+
+
+def product_name_from_url(url: str) -> str | None:
+    parsed = urlparse(url)
+    segments = [unquote(segment) for segment in parsed.path.split("/") if segment]
+    if not segments:
+        return None
+    language_segments = {"en", "en-ca", "en-us", "en-gb", "fr", "ja", "ko", "products", "product"}
+    slug = ""
+    if "info.html" in segments:
+        idx = segments.index("info.html")
+        if idx > 0:
+            slug = segments[idx - 1]
+    elif "products" in segments:
+        idx = segments.index("products")
+        if idx + 1 < len(segments):
+            slug = segments[idx + 1]
+    if not slug:
+        for segment in reversed(segments):
+            if segment.lower() not in language_segments and not segment.lower().startswith("pid."):
+                slug = segment
+                break
+    slug = re.sub(r"\.(?:html?|php)$", "", slug, flags=re.I)
+    slug = re.sub(r"\bpid\.?\d+\b", "", slug, flags=re.I)
+    slug = re.sub(r"[-_+]+", " ", slug)
+    slug = re.sub(r"\s+", " ", slug).strip(" /-_.")
+    if len(slug) < 4 or slug.lower() in language_segments or re.fullmatch(r"\d{4,}", slug):
+        return None
+    return title_case_product_slug(slug)
+
+
+def product_name_from_text(text: str) -> str | None:
+    if not text:
+        return None
+    first_screen = re.sub(r"\s+", " ", text[:1400])
+    split_pattern = r"\s*(?:\||｜|–|—| - |Skip to Content|Skip to content|Welcome to)\s*"
+    bad_terms = re.compile(
+        r"privacy|shipping|policy|login|ranking|category|brand|cart|account|menu|official site|"
+        r"free shipping|new arrivals|best selling",
+        flags=re.I,
+    )
+    product_terms = re.compile(
+        r"lip|liner|eyeliner|mascara|mask|foundation|cushion|blush|palette|gloss|tint|pencil|"
+        r"cream|serum|sunscreen|powder|concealer|highlighter|shadow",
+        flags=re.I,
+    )
+    candidates = []
+    for chunk in re.split(split_pattern, first_screen):
+        clean = html.unescape(chunk)
+        clean = re.sub(r"【([^】]+)】", r"\1 ", clean)
+        clean = re.sub(r"\([^)]*(?:official|authentic|shipping|sale)[^)]*\)", " ", clean, flags=re.I)
+        clean = re.sub(r"[^A-Za-z0-9#&+()./'\-\s]", " ", clean)
+        clean = re.sub(r"^.*\b(?:drugstore|store|shop)\b\s+", "", clean, flags=re.I)
+        clean = re.sub(r"^\s*msh\b", "MSH", clean, flags=re.I)
+        clean = re.sub(r"\s+", " ", clean).strip(" .:-")
+        words = re.findall(r"[A-Za-z0-9#&+()./'-]+", clean)
+        if len(words) < 4 or len(clean) > 120:
+            continue
+        if bad_terms.search(clean) or not product_terms.search(clean):
+            continue
+        score = len(words) + (4 if re.search(r"\b(?:black|brown|pink|beige|red|rose|coral)\b", clean, flags=re.I) else 0)
+        candidates.append((score, clean))
+    if not candidates:
+        return None
+    return max(candidates, key=lambda item: item[0])[1]
+
+
+def inferred_product_name(product: str, source_url: str, source_text: str = "") -> str | None:
+    if normalize_product_name(product):
+        return normalize_product_name(product)
+    name = product_name_from_text(source_text)
+    if name:
+        return name
+    for url in source_urls_from_text(source_url):
+        name = product_name_from_url(url)
+        if name:
+            return name
+    return None
+
+
 def known_product_fallback(barcode: str, product: str) -> dict[str, str]:
     known = KNOWN_ONLINE_PRODUCTS.get(barcode)
     if known:
@@ -3248,6 +3340,13 @@ def process_row(
     if verified_known_product(known):
         source_url = known["source_url"]
         notes.append("Used verified product data for this shade.")
+        if not normalize_product_name(product):
+            for url in source_urls_from_text(source_url):
+                text = fetch_text(url)
+                if len(text) > 200:
+                    texts.append((url, text))
+                    if product_name_from_text(text):
+                        break
     else:
         if not family_context:
             family_context = cached_family_context(product, use_cache)
@@ -3280,17 +3379,25 @@ def process_row(
     source_url = format_source_urls(source_urls_from_text(source_url))
 
     combined_text = " ".join(text for _url, text in texts)
+    resolved_product = normalize_product_name(product)
+    if not resolved_product:
+        for _url, text in texts:
+            resolved_product = product_name_from_text(text) or ""
+            if resolved_product:
+                break
+    resolved_product = resolved_product or inferred_product_name(product, source_url, combined_text) or product
     source_direction = how_to_use_from_text(combined_text) or known.get("source_direction")
-    direction_en, direction_fr = direction_for_product(product, source_direction, combined_text)
-    caution_en, caution_fr = cautions_for_product(product, combined_text)
-    count_net_weight = pcs_count_from_text(product, combined_text)
+    direction_en, direction_fr = direction_for_product(resolved_product, source_direction, combined_text)
+    caution_en, caution_fr = cautions_for_product(resolved_product, combined_text)
+    count_net_weight = pcs_count_from_text(resolved_product, combined_text)
 
-    values["product name french"] = product_name_fr(product)
+    values["product name"] = resolved_product
+    values["product name french"] = product_name_fr(resolved_product)
     net_weight = (
-        compatible_net_weight(product, known.get("net weight"))
-        or compatible_net_weight(product, net_weight_from_name(product))
-        or compatible_net_weight(product, net_weight_from_text(combined_text))
-        or compatible_net_weight(product, count_net_weight)
+        compatible_net_weight(resolved_product, known.get("net weight"))
+        or compatible_net_weight(resolved_product, net_weight_from_name(resolved_product))
+        or compatible_net_weight(resolved_product, net_weight_from_text(combined_text))
+        or compatible_net_weight(resolved_product, count_net_weight)
     )
     values["net weight"] = net_weight or "need to review"
     values["direction for use"] = direction_en
@@ -3299,12 +3406,12 @@ def process_row(
     values["mises en garde:"] = caution_fr
     values["manufacturer"] = manufacturer_from_text(combined_text) or known.get("manufacturer") or "need to review"
     values["ingredients/ingrédients"] = (
-        ingredients_from_text(combined_text, product)
+        ingredients_from_text(combined_text, resolved_product)
         or ingredients_label_from_known(known)
-        or material_label_from_text(product, combined_text)
+        or material_label_from_text(resolved_product, combined_text)
         or "need to review"
     )
-    values["coo"] = coo_from_text(combined_text + " " + product) or known.get("coo") or "need to review"
+    values["coo"] = coo_from_text(combined_text + " " + resolved_product) or known.get("coo") or "need to review"
     values["distributed by / distribué par:"] = DISTRIBUTOR
 
     for field in REQUIRED_LABEL_FIELDS:
@@ -3560,9 +3667,10 @@ def process_direct_rows(
     records = []
     for item in sorted(processed_items, key=lambda value: value["idx"]):
         result = item["result"]
+        resolved_product = result.values.get("product name") or item["product"]
         record = {
             "barcode": item["barcode"],
-            "product name": item["product"],
+            "product name": resolved_product,
         }
         for field in REQUIRED_LABEL_FIELDS:
             record[field] = result.values.get(field, "need to review")
