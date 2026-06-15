@@ -240,6 +240,9 @@ PRODUCT_PHRASE_ALIASES = {
     "shero lip mud": "Shero Super Matte Lip Cheek Mud",
     "shero super matte lip mud": "Shero Super Matte Lip Cheek Mud",
     "super matte lip mud": "Shero Super Matte Lip Cheek Mud",
+    "slim lip velvet": "Slim Velvet Lip Color",
+    "slim velvet lip": "Slim Velvet Lip Color",
+    "slim velvet lip color": "Slim Velvet Lip Color",
     "creamfit": "Cream Fit",
     "cream fit": "Cream Fit",
     "slimoval": "Ultra Slim",
@@ -306,6 +309,12 @@ TOOL_ITEM_TERMS = [
 ]
 
 BRAND_ALIAS_RULES = [
+    {
+        "keywords": ("3ce",),
+        "patterns": [r"\b3\s*ce\b", r"\b3ce\b", r"\b3\s*concept\s*eyes\b"],
+        "aliases": ["3CE", "3 Concept Eyes"],
+        "domains": ["3cecosmetics.com", "yesstyle.com", "asianbeautywholesale.com", "hwahae.com", "stylevana.com"],
+    },
     {
         "keywords": ("smiski",),
         "patterns": [r"\bsmiski\b", r"\bdreams\s*smiski\b"],
@@ -1061,6 +1070,18 @@ def net_weight_from_text(text: str) -> str | None:
             unit = "mL" if unit.lower() == "ml" else "g"
             return f"Net. {amount} {unit}"
     return None
+
+
+def compatible_net_weight(product: str, net_weight: str | None) -> str | None:
+    if not net_weight:
+        return None
+    clean_product = searchable_text(product)
+    clean_weight = searchable_text(net_weight)
+    solid_lip_terms = ["lipstick", "lip color", "lipcolour", "lip stick", "matte lip color", "velvet lip color"]
+    if "ml" in clean_weight and any(term in clean_product for term in solid_lip_terms):
+        if not any(term in clean_product for term in ["liquid", "tint", "gloss", "serum", "oil"]):
+            return None
+    return net_weight
 
 
 def pcs_count_from_text(product: str, text: str = "") -> str | None:
@@ -2041,6 +2062,11 @@ def fuzzy_queries(barcode: str, product: str) -> list[str]:
         f"\"{search_basis}\"",
         f"\"{clean_product}\" ingredients",
         f"\"{search_basis}\" ingredients",
+        f"\"{search_basis}\" \"major ingredients\"",
+        f"\"{search_basis}\" INCI",
+        f"{search_basis} YesStyle ingredients",
+        f"{search_basis} Hwahae ingredients",
+        f"{search_basis} AsianBeautyWholesale ingredients",
         f"\"{search_basis}\" net weight",
         f"{search_basis} ingredients net weight",
         f"{search_basis} how to use ingredients",
@@ -2472,6 +2498,15 @@ def candidate_urls(barcode: str, product: str) -> list[str]:
                 "https://incidecoder.com/products/3ce-mood-recipe-lip-color",
             ]
         )
+    if "3ce" in clean_lookup and "slim" in clean_lookup and "velvet" in clean_lookup and "lip" in clean_lookup:
+        candidates.extend(
+            [
+                "https://www.yesstyle.com/en/3ce-slim-velvet-lip-color-15-colors-true-red-new-version/info.html/pid.1068651074",
+                "https://www.asianbeautywholesale.com/en/3ce-slim-velvet-lip-color-15-colors-true-red-new-version/info.html/pid.1068651074",
+                "https://www.yesstyle.com/en/3ce-slim-velvet-lip-color-mood-for-blossom-edition-5-colors-hold-on/info.html/pid.1072730195",
+                "https://www.hwahae.com/en/products/3CE-Slim-Velvet-Lip-Color-Cotton-Up/1827272/ingredients",
+            ]
+        )
     if "into" in clean_lookup and "six" in clean_lookup and "blush" in clean_lookup:
         candidates.append("https://www.yesstyle.com/en/into-you-six-color-blush-palette-six-color-blush-palette-15g/info.html/pid.1137202898")
     if "judydoll" in clean_lookup and "liquid" in clean_lookup and "blush" in clean_lookup:
@@ -2814,13 +2849,13 @@ def process_row(
     count_net_weight = pcs_count_from_text(product, combined_text)
 
     values["product name french"] = product_name_fr(product)
-    values["net weight"] = (
-        known.get("net weight")
-        or net_weight_from_name(product)
-        or count_net_weight
-        or net_weight_from_text(combined_text)
-        or "need to review"
+    net_weight = (
+        compatible_net_weight(product, known.get("net weight"))
+        or compatible_net_weight(product, net_weight_from_name(product))
+        or compatible_net_weight(product, count_net_weight)
+        or compatible_net_weight(product, net_weight_from_text(combined_text))
     )
+    values["net weight"] = net_weight or "need to review"
     values["direction for use"] = direction_en
     values["mode d’emploi"] = direction_fr
     values["cautions"] = caution_en
