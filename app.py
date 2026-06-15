@@ -7,6 +7,7 @@ import re
 import secrets
 import sqlite3
 import tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from html.parser import HTMLParser
@@ -811,6 +812,8 @@ def product_detail_bonus(url: str) -> float:
     path = parsed.path.lower()
     if "yesstyle.com" in domain and "/info.html" in path and "/pid." in path:
         return 7.0
+    if "3cecosmetics.com" in domain and "/all-products/" in path:
+        return 7.0
     if "/products/" in path:
         return 6.5
     if path.endswith(".html") and not is_noise_url(url):
@@ -1318,6 +1321,10 @@ def valid_ingredient_candidate(ingredients: str) -> bool:
         "product details",
         "product information",
         "official service",
+        "login register",
+        "decode inci",
+        "products ingredients decode",
+        "follow us on",
         "shipping",
         "return policy",
         "add to cart",
@@ -1394,6 +1401,8 @@ def looks_like_uncomma_ingredient_list(ingredients: str) -> bool:
 
 def normalize_ingredients_text(ingredients: str) -> str:
     ingredients = trim_non_ingredient_tail(ingredients)
+    ingredients = re.sub(r"^(?:major\s+)?ingredients?\s*(?:[:：-])?\s*", "", ingredients, flags=re.I)
+    ingredients = re.sub(r"^ingr[eé]dients?\s*(?:[:：-])?\s*", "", ingredients, flags=re.I)
     ingredients = re.sub(
         r"^(?:[A-Z][A-Z0-9'/-]*\s+){1,4}(?=(?:Aqua|Water|Silica|Dimethicone|Mica|Talc|"
         r"Isononyl|Polybutene|Ethylhexyl|Synthetic|Titanium|Iron|CI)\b)",
@@ -2057,9 +2066,11 @@ def fuzzy_queries(barcode: str, product: str) -> list[str]:
     core = " ".join(tokens[:6])
     tail = " ".join(tokens[:6])
     brand_domains = brand_domains_for_product(clean_product)
+    domain_queries = [f"{core} site:{domain}" for domain in brand_domains[:5] if core]
     queries = [
         f"\"{clean_product}\"",
         f"\"{search_basis}\"",
+        *domain_queries,
         f"\"{clean_product}\" ingredients",
         f"\"{search_basis}\" ingredients",
         f"\"{search_basis}\" \"major ingredients\"",
@@ -2087,8 +2098,6 @@ def fuzzy_queries(barcode: str, product: str) -> list[str]:
                 f"{search_basis} official",
             ]
         )
-    for domain in brand_domains[:5]:
-        queries.append(f"{core} site:{domain}")
     for alias in aliases[1:]:
         queries.extend(
             [
@@ -2601,7 +2610,15 @@ def candidate_urls(barcode: str, product: str) -> list[str]:
     strong_static_candidates = any(
         exact_product_url(url, clean_product) or product_detail_bonus(url) >= 6 for url in candidates
     )
-    search_limit = 0 if len(candidates) >= 4 and strong_static_candidates else (12 if strong_static_candidates else 30)
+    brand_domains = brand_domains_for_product(clean_product)
+    if len(candidates) >= 4 and strong_static_candidates:
+        search_limit = 0
+    elif strong_static_candidates:
+        search_limit = 8
+    elif brand_domains:
+        search_limit = 18
+    else:
+        search_limit = 30
     for query in fuzzy_queries(barcode, clean_product)[:search_limit]:
         for result in search_web(query):
             url = result["url"]
@@ -2666,8 +2683,6 @@ def known_product_fallback(barcode: str, product: str) -> dict[str, str]:
 def enough_product_data(texts: list[tuple[str, str]], product: str, known: dict[str, str]) -> bool:
     if len(texts) >= 4:
         return True
-    if len(texts) < 2:
-        return False
     combined = " ".join(text for _url, text in texts)
     has_net = bool(
         net_weight_from_text(combined)
@@ -2680,6 +2695,10 @@ def enough_product_data(texts: list[tuple[str, str]], product: str, known: dict[
         or (ingredients_label_from_known(known) != "need to review")
         or material_label_from_text(product, combined)
     )
+    if has_ingredients and texts:
+        return True
+    if len(texts) < 2:
+        return False
     return has_net and has_ingredients
 
 
@@ -2717,6 +2736,33 @@ def format_source_urls(urls: list[str], limit: int = MAX_SOURCE_URLS) -> str:
         if len(deduped) >= limit:
             break
     return "\n".join(deduped)
+
+
+def fetch_source_texts(urls: list[str], product: str, known: dict[str, str]) -> list[tuple[str, str]]:
+    texts: list[tuple[str, str]] = []
+    if not urls:
+        return texts
+    target_urls = urls[: min(6, len(urls))]
+    max_workers = min(4, len(target_urls))
+    executor = ThreadPoolExecutor(max_workers=max_workers)
+    try:
+        future_to_url = {executor.submit(fetch_text, url): url for url in target_urls}
+        for future in as_completed(future_to_url):
+            url = future_to_url[future]
+            try:
+                text = future.result()
+            except Exception:
+                continue
+            if len(text) > 200:
+                texts.append((url, text))
+                if enough_product_data(texts, product, known):
+                    for pending in future_to_url:
+                        if not pending.done():
+                            pending.cancel()
+                    break
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+    return sorted(texts, key=lambda item: urls.index(item[0]) if item[0] in urls else len(urls))
 
 
 def status_from_values(values: dict[str, str], source_url: str) -> str:
@@ -2819,12 +2865,7 @@ def process_row(
         else:
             urls = candidate_urls(barcode, product)
         source_candidates = urls + source_candidates
-        for url in urls:
-            text = fetch_text(url)
-            if len(text) > 200:
-                texts.append((url, text))
-                if enough_product_data(texts, product, known):
-                    break
+        texts = fetch_source_texts(urls, product, known)
         if texts:
             checked_urls = [url for url, _text in texts]
             source_url = format_source_urls(checked_urls + source_candidates)
