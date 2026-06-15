@@ -3816,6 +3816,21 @@ def login_screen() -> None:
         st.error("Invalid username or password.")
 
 
+def search_settings_guide() -> None:
+    with st.expander("Search settings guide"):
+        st.markdown(
+            """
+**Fast mode** checks saved cache, known brand sources, official pages, and a smaller group of trusted product pages first. Use this for normal bulk Excel processing.
+
+**Deep mode** searches more broadly and checks more candidate pages. Use this when Fast mode leaves important fields as `need to review`, especially ingredients or source URL.
+
+**Parallel product groups** means how many product families the app works on at the same time. A higher number can process a large file faster, but too high may cause website timeouts or slower responses. Use `3-4` for normal files, `1-2` if websites are timing out, and `5-6` only when the file is large and the connection is stable.
+
+**Saved search cache** reuses previous successful searches, so repeated products or same-series shade products can run faster and stay more consistent.
+            """
+        )
+
+
 def excel_workbook_section() -> None:
     st.download_button(
         "Download Excel template",
@@ -3844,6 +3859,7 @@ def excel_workbook_section() -> None:
         value=True,
         key="workbook_use_defaults",
     )
+    search_settings_guide()
     search_mode = st.radio(
         "Search mode",
         SEARCH_MODES,
@@ -3946,6 +3962,7 @@ def direct_search_section() -> None:
         value=True,
         key="direct_use_defaults",
     )
+    search_settings_guide()
     search_mode = st.radio(
         "Search mode",
         SEARCH_MODES,
