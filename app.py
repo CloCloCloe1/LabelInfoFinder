@@ -73,7 +73,6 @@ REQUIRED_LABEL_FIELDS = [
     "cautions",
     "mises en garde:",
     "ingredients/ingrédients",
-    "manufacturer",
     "distributed by / distribué par:",
     "coo",
 ]
@@ -84,7 +83,6 @@ SHARED_FAMILY_FIELDS = [
     "mode d’emploi",
     "cautions",
     "mises en garde:",
-    "manufacturer",
     "distributed by / distribué par:",
     "coo",
 ]
@@ -250,6 +248,8 @@ PRODUCT_PHRASE_ALIASES = {
     "slim lip velvet": "Slim Velvet Lip Color",
     "slim velvet lip": "Slim Velvet Lip Color",
     "slim velvet lip color": "Slim Velvet Lip Color",
+    "lip clolor": "Lip Color",
+    "auq fit": "Aqua Fit",
     "creamfit": "Cream Fit",
     "cream fit": "Cream Fit",
     "slimoval": "Ultra Slim",
@@ -316,6 +316,18 @@ TOOL_ITEM_TERMS = [
 ]
 
 BRAND_ALIAS_RULES = [
+    {
+        "keywords": ("abib",),
+        "patterns": [r"\babib\b"],
+        "aliases": ["Abib"],
+        "domains": ["en.abib.com", "yesstyle.com", "oliveyoung.com", "hwahae.com"],
+    },
+    {
+        "keywords": ("andbe",),
+        "patterns": [r"\b&\s*be\b", r"\band\s*be\b", r"\b＆\s*be\b", r"\bbe\b"],
+        "aliases": ["&be", "andbe"],
+        "domains": ["andbe-official.com", "yesstyle.com", "japaniful.com", "hwahae.com"],
+    },
     {
         "keywords": ("3ce",),
         "patterns": [r"\b3\s*ce\b", r"\b3ce\b", r"\b3\s*concept\s*eyes\b"],
@@ -1027,7 +1039,19 @@ def highlight_need_review_cells(wb: openpyxl.Workbook) -> None:
                 apply_need_review_highlight(cell)
 
 
+def remove_manufacturer_columns(ws: openpyxl.worksheet.worksheet.Worksheet) -> None:
+    headers = normalized_headers(ws)
+    cols = [
+        col
+        for header, col in headers.items()
+        if header == "manufacturer" or "manufacturer" in header
+    ]
+    for col in sorted(set(cols), reverse=True):
+        ws.delete_cols(col)
+
+
 def add_audit_columns(ws: openpyxl.worksheet.worksheet.Worksheet) -> dict[str, int]:
+    remove_manufacturer_columns(ws)
     headers = normalized_headers(ws)
     for label in ["source websites", "source notes", "row status"]:
         col = headers.get(label)
@@ -1060,7 +1084,7 @@ def net_weight_from_name(name: str) -> str | None:
         return None
     amount, unit, extra = match.group(1), match.group(2), match.group(3)
     unit = "mL" if unit.lower() == "ml" else "g"
-    result = f"Net.{amount} {unit}"
+    result = f"Net. {amount} {unit}"
     if extra:
         result += " + 1 PCS"
     return result
@@ -1068,6 +1092,7 @@ def net_weight_from_name(name: str) -> str | None:
 
 def net_weight_from_text(text: str) -> str | None:
     patterns = [
+        r"(\d+(?:\.\d+)?)\s*(g|gram|grams|ml|mL|ML)\s*(?:/[^x]{0,20})?\s*[x×]\s*(\d{1,3})",
         r"net\s*weight\s*[:：]?\s*(\d+(?:\.\d+)?)\s*(g|gram|grams|ml|mL|ML)",
         r"(\d+(?:\.\d+)?)\s*(g|gram|grams|ml|mL|ML)\s*/\s*0\.",
         r"(\d+(?:\.\d+)?)\s*(g|gram|grams|ml|mL|ML)\b",
@@ -1077,6 +1102,8 @@ def net_weight_from_text(text: str) -> str | None:
         if match:
             amount, unit = match.group(1), match.group(2)
             unit = "mL" if unit.lower() == "ml" else "g"
+            if len(match.groups()) >= 3 and match.group(3):
+                return f"Net. {amount} {unit} x {int(match.group(3))} PCS"
             return f"Net. {amount} {unit}"
     return None
 
@@ -1414,6 +1441,7 @@ def looks_like_uncomma_ingredient_list(ingredients: str) -> bool:
 
 
 def normalize_ingredients_text(ingredients: str) -> str:
+    ingredients = re.sub(r'^[\w\s"{}:,-]*["\']ingredients["\']\s*:\s*["\']?', "", ingredients, flags=re.I)
     ingredients = re.sub(r"^(?:major\s+)?ingredients?\s*(?:[:：-])?\s*", "", ingredients, flags=re.I)
     ingredients = re.sub(r"^ingr[eé]dients?\s*(?:[:：-])?\s*", "", ingredients, flags=re.I)
     ingredients = trim_non_ingredient_tail(ingredients)
@@ -1952,7 +1980,7 @@ def expand_product_abbreviations(product: str) -> str:
 
 
 def brand_rule_for_product(product: str) -> dict[str, Any] | None:
-    clean = searchable_text(product)
+    clean = searchable_text(expand_product_abbreviations(product))
     compact = compact_text(product)
     for rule in BRAND_ALIAS_RULES:
         if all(keyword in clean or keyword in compact for keyword in rule["keywords"]):
@@ -2013,7 +2041,7 @@ def generic_color_name(product: str) -> str:
 
 
 def is_love_liner_cream_fit(product: str) -> bool:
-    clean = searchable_text(product)
+    clean = searchable_text(expand_product_abbreviations(product))
     compact = compact_text(product)
     brand_match = "loveliner" in compact or "loveerliner" in compact or "love liner" in clean
     cream_fit_match = "creamfit" in compact or ("cream" in clean and "fit" in clean)
@@ -2021,7 +2049,7 @@ def is_love_liner_cream_fit(product: str) -> bool:
 
 
 def is_love_liner_liquid_eyeliner(product: str) -> bool:
-    clean = searchable_text(product)
+    clean = searchable_text(expand_product_abbreviations(product))
     compact = compact_text(product)
     brand_match = "loveliner" in compact or "loveerliner" in compact or "love liner" in clean
     liquid_match = "liquideyeliner" in compact or ("liquid" in clean and ("eyeliner" in clean or "eye liner" in clean))
@@ -2777,6 +2805,25 @@ def candidate_urls(
             [
                 "https://www.3cecosmetics.com/all-products/lips/lipstick/3ce-mood-recipe-matte-lip-color",
                 "https://incidecoder.com/products/3ce-mood-recipe-lip-color",
+                "https://www.hwahae.com/en/products/1795698",
+            ]
+        )
+    if (
+        barcode == "521678"
+        or ("cushion" in clean_lookup and "foundation" in clean_lookup and ("&be" in clean_product.lower() or " be " in f" {clean_lookup} "))
+    ):
+        candidates.extend(
+            [
+                "https://www.yesstyle.com/en/be-cushion-foundation-light-beige-spf-24-pa-12g/info.html/pid.1124871719",
+                "https://www.japaniful.com/en-ca/collections/be/products/be-cushion-foundation-12g",
+                "https://www.hwahae.com/en/products/be-Cushion-Foundation-SPF24-PAPLUS-PLUS-PLUS-Beige/2165908/ingredients",
+            ]
+        )
+    if barcode == "8809030733368" or ("abib" in clean_lookup and "mild" in clean_lookup and "acidic" in clean_lookup and ("aqua" in clean_lookup or "fit" in clean_lookup)):
+        candidates.extend(
+            [
+                "https://en.abib.com/products/aqua-fit",
+                "https://www.yesstyle.com/en/abib-mild-acidic-ph-sheet-mask-aqua-fit-10-pcs/info.html",
             ]
         )
     if "3ce" in clean_lookup and "slim" in clean_lookup and "velvet" in clean_lookup and "lip" in clean_lookup:
@@ -2921,13 +2968,27 @@ def known_product_fallback(barcode: str, product: str) -> dict[str, str]:
     known = KNOWN_ONLINE_PRODUCTS.get(barcode)
     if known:
         return known
-    clean = searchable_text(product)
+    clean = searchable_text(expand_product_abbreviations(product))
     if "into" in clean and "glow" in clean and "lipstick" in clean:
         return KNOWN_ONLINE_PRODUCTS["1129343972"]
     if "into" in clean and "airy" in clean and "lip" in clean and ("cheek" in clean or "mud" in clean):
         return KNOWN_ONLINE_PRODUCTS["1126245093"]
     if "into" in clean and "six" in clean and "blush" in clean and "palette" in clean:
         return KNOWN_ONLINE_PRODUCTS["1137202898"]
+    if "3ce" in clean and "mood" in clean and "recipe" in clean and "lip" in clean and "color" in clean:
+        return {
+            "source_url": (
+                "https://www.3cecosmetics.com/all-products/lips/lipstick/3ce-mood-recipe-matte-lip-color\n"
+                "https://www.hwahae.com/en/products/1795698"
+            ),
+            "net weight": "Net. 3.5 g",
+            "coo": "Made In Korea / Fabriqué En Corée",
+        }
+    if barcode == "8809030733368" or ("abib" in clean and "mild" in clean and "acidic" in clean and ("aqua" in clean or "fit" in clean)):
+        return {
+            "source_url": "https://en.abib.com/products/aqua-fit",
+            "coo": "Made In Korea / Fabriqué En Corée",
+        }
     if barcode == "4570159423723" or is_love_liner_liquid_eyeliner(product):
         return dict(LOVE_LINER_LIQUID_EYELINER_R5)
     if is_love_liner_cream_fit(product):
@@ -3209,8 +3270,8 @@ def process_row(
     net_weight = (
         compatible_net_weight(product, known.get("net weight"))
         or compatible_net_weight(product, net_weight_from_name(product))
-        or compatible_net_weight(product, count_net_weight)
         or compatible_net_weight(product, net_weight_from_text(combined_text))
+        or compatible_net_weight(product, count_net_weight)
     )
     values["net weight"] = net_weight or "need to review"
     values["direction for use"] = direction_en
@@ -3311,6 +3372,8 @@ def export_workbook(wb: openpyxl.Workbook, name: str) -> Path:
     EXPORT_DIR.mkdir(exist_ok=True)
     safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", name).strip("_") or "filled_labels.xlsx"
     output = EXPORT_DIR / safe
+    for ws in wb.worksheets:
+        remove_manufacturer_columns(ws)
     normalize_barcode_columns(wb)
     highlight_need_review_cells(wb)
     wb.save(output)
