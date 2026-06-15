@@ -2649,6 +2649,47 @@ def normalize_barcode(value: Any) -> str:
     return text
 
 
+def sku_from_url(url: str) -> str | None:
+    patterns = [
+        r"\bpid\.?(\d{6,14})\b",
+        r"/(?:default/)?(\d{8,14})\.html\b",
+        r"/products?/[^/?#]*?(\d{8,14})(?:[/?#.-]|$)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, url, flags=re.I)
+        if match:
+            return normalize_barcode(match.group(1))
+    return None
+
+
+def sku_from_text(text: str) -> str | None:
+    if not text:
+        return None
+    patterns = [
+        r"(?:barcode|bar\s*code|upc|ean|jan|gtin|sku|item\s*(?:no|number|#)|product\s*(?:code|id|number)|商品番号|品番|제품\s*번호|상품\s*번호|품번)\s*[:#：]?\s*([A-Z0-9-]{5,24})",
+        r"\b(45\d{11})\b",
+        r"\b(49\d{11})\b",
+        r"\b(88\d{11})\b",
+    ]
+    for pattern in patterns:
+        for match in re.finditer(pattern, text, flags=re.I):
+            value = normalize_barcode(match.group(1).strip("-_. "))
+            if re.fullmatch(r"[A-Z0-9-]{5,24}", value, flags=re.I):
+                return value
+    return None
+
+
+def inferred_sku(barcode: str, source_url: str, source_text: str) -> str:
+    existing = normalize_barcode(barcode)
+    if existing:
+        return existing
+    for url in source_urls_from_text(source_url):
+        sku = sku_from_url(url)
+        if sku:
+            return sku
+    return sku_from_text(source_text) or ""
+
+
 def normalize_barcode_columns(wb: openpyxl.Workbook) -> None:
     for ws in wb.worksheets:
         headers = normalized_headers(ws)
@@ -3331,7 +3372,7 @@ def process_row(
         ), family_context)
 
     cached = cached_fill_result(barcode, product, use_cache)
-    if cached:
+    if cached and (barcode or cached.values.get("barcode")):
         return cached
 
     known = known_product_fallback(barcode, product)
@@ -3379,6 +3420,7 @@ def process_row(
     source_url = format_source_urls(source_urls_from_text(source_url))
 
     combined_text = " ".join(text for _url, text in texts)
+    resolved_barcode = inferred_sku(barcode, source_url, combined_text)
     resolved_product = normalize_product_name(product)
     if not resolved_product:
         for _url, text in texts:
@@ -3391,6 +3433,7 @@ def process_row(
     caution_en, caution_fr = cautions_for_product(resolved_product, combined_text)
     count_net_weight = pcs_count_from_text(resolved_product, combined_text)
 
+    values["barcode"] = resolved_barcode
     values["product name"] = resolved_product
     values["product name french"] = product_name_fr(resolved_product)
     net_weight = (
@@ -3669,7 +3712,7 @@ def process_direct_rows(
         result = item["result"]
         resolved_product = result.values.get("product name") or item["product"]
         record = {
-            "barcode": item["barcode"],
+            "barcode": result.values.get("barcode") or item["barcode"],
             "product name": resolved_product,
         }
         for field in REQUIRED_LABEL_FIELDS:
@@ -3722,6 +3765,42 @@ def export_direct_dataframe(df: pd.DataFrame, output_name: str = "direct_label_i
     return export_workbook(wb, output_name)
 
 
+def template_workbook_bytes() -> bytes:
+    columns = ["barcode", "product name", *REQUIRED_LABEL_FIELDS, "source url"]
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Label Info Template"
+    for col_idx, header in enumerate(columns, start=1):
+        cell = ws.cell(1, col_idx)
+        cell.value = header
+        cell.font = openpyxl.styles.Font(bold=True)
+        cell.fill = openpyxl.styles.PatternFill("solid", fgColor="D9EAF7")
+        cell.alignment = openpyxl.styles.Alignment(wrap_text=True, vertical="top")
+    for row_idx in range(2, 22):
+        ws.cell(row_idx, 1).number_format = "@"
+    widths = {
+        "barcode": 18,
+        "product name": 34,
+        "product name french": 34,
+        "net weight": 18,
+        "source url": 54,
+    }
+    for col_idx, header in enumerate(columns, start=1):
+        width = widths.get(header, 46 if any(key in header for key in ["direction", "ingredients", "cautions", "garde"]) else 30)
+        ws.column_dimensions[openpyxl.utils.get_column_letter(col_idx)].width = width
+    ws.freeze_panes = "A2"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx", dir=DATA_DIR) as tmp:
+        tmp_path = Path(tmp.name)
+    try:
+        wb.save(tmp_path)
+        return tmp_path.read_bytes()
+    finally:
+        try:
+            tmp_path.unlink()
+        except OSError:
+            pass
+
+
 def login_screen() -> None:
     st.title(SITE_NAME)
     st.caption("Private workbook processing for bilingual Nakama labels.")
@@ -3738,6 +3817,12 @@ def login_screen() -> None:
 
 
 def excel_workbook_section() -> None:
+    st.download_button(
+        "Download Excel template",
+        data=template_workbook_bytes(),
+        file_name="label_info_template.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
     uploaded = st.file_uploader("Excel workbook", type=["xlsx"])
     if not uploaded:
         return
