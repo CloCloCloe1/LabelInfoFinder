@@ -83,6 +83,7 @@ SHARED_FAMILY_FIELDS = [
 ]
 
 TRUSTED_DOMAINS = [
+    "3cecosmetics.com",
     "smiski.com",
     "smiskifigures.com",
     "littleobsessed.com",
@@ -854,9 +855,45 @@ def fetch_direct_text(url: str) -> str:
         response.raise_for_status()
     except requests.RequestException:
         return ""
+    embedded_text = extract_embedded_product_text(response.text)
     text = re.sub(r"<script.*?</script>|<style.*?</style>", " ", response.text, flags=re.S | re.I)
     text = re.sub(r"<[^>]+>", " ", text)
-    return html.unescape(re.sub(r"\s+", " ", text)).strip()
+    return html.unescape(re.sub(r"\s+", " ", f"{text} {embedded_text}")).strip()
+
+
+def extract_embedded_product_text(raw_html: str) -> str:
+    pieces: list[str] = []
+    pieces.extend(extract_escaped_content_blocks(raw_html))
+    for script in re.findall(r"<script[^>]*>(.*?)</script>", raw_html, flags=re.S | re.I):
+        if not re.search(r"ingredients?|product information|net weight|country of origin|how to use", script, flags=re.I):
+            continue
+        text = html.unescape(script)
+        text = html.unescape(text)
+        text = text.replace("\\n", " ").replace("\\/", "/").replace('\\"', '"')
+        text = re.sub(r"<[^>]+>", " ", text)
+        text = re.sub(r"[\{\}\[\]]", " ", text)
+        text = re.sub(r'"(?:title|content|name|description)"\s*:\s*', " ", text, flags=re.I)
+        text = re.sub(r"\\u[0-9a-fA-F]{4}", " ", text)
+        pieces.append(text)
+    return html.unescape(re.sub(r"\s+", " ", " ".join(pieces))).strip()
+
+
+def extract_escaped_content_blocks(raw_html: str) -> list[str]:
+    blocks: list[str] = []
+    pattern = r"&quot;title&quot;:&quot;([^&]{3,80})&quot;,&quot;content&quot;:&quot;(.*?)&quot;\}"
+    useful_titles = re.compile(
+        r"ingredients?|major ingredients?|product information|description|details|how to use|directions?|"
+        r"cautions?|warnings?|country of origin|manufacturer",
+        flags=re.I,
+    )
+    for title, content in re.findall(pattern, raw_html, flags=re.S | re.I):
+        if not useful_titles.search(html.unescape(title)):
+            continue
+        text = html.unescape(html.unescape(content))
+        text = text.replace("\\n", " ").replace("\\/", "/").replace('\\"', '"')
+        text = re.sub(r"<[^>]+>", " ", text)
+        blocks.append(f"{html.unescape(title)}: {text}")
+    return blocks
 
 
 def fetch_jina_text(url: str) -> str:
@@ -1136,6 +1173,10 @@ def domain_from_url(url: str) -> str:
 def ingredients_from_text(text: str, product: str = "") -> str | None:
     if not text:
         return None
+    text = html.unescape(html.unescape(text))
+    text = text.replace("\\n", " ").replace('\\"', '"')
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\s+", " ", text)
     shade_ingredients = ingredients_for_shade(text, product)
     if shade_ingredients:
         return ingredients_label(shade_ingredients)
@@ -1155,7 +1196,7 @@ def ingredients_from_text(text: str, product: str = "") -> str | None:
     for pattern in patterns:
         for match in re.finditer(pattern, text, flags=re.I):
             candidate = normalize_ingredients_text(match.group(1))
-            if len(candidate) >= 40 and "," in candidate:
+            if len(candidate) >= 40 and ("," in candidate or looks_like_uncomma_ingredient_list(candidate)):
                 candidates.append(candidate)
     candidates = [
         candidate
@@ -1175,21 +1216,39 @@ def ingredients_for_shade(text: str, product: str) -> str | None:
     if not shade_pattern:
         return None
     ingredient_head = r"(?:major\s+ingredients?|ingredients?|ingr[eé]dients?)"
+    next_shade_pattern = r"(?<![-/\w])#?\s*(?:\d{2,3}|[a-z]{1,2}\s*\d{1,3})\s+(?-i:[A-Z][A-Za-z]+)"
+    candidates = []
+    for head_match in re.finditer(ingredient_head, text, flags=re.I):
+        section = text[head_match.end(): head_match.end() + 9000]
+        for shade_match in re.finditer(shade_pattern, section, flags=re.I):
+            tail = section[shade_match.end():]
+            next_match = re.search(next_shade_pattern, tail, flags=re.I)
+            candidate_text = tail[: next_match.start()] if next_match else tail
+            candidate = normalize_ingredients_text(candidate_text)
+            if (
+                len(candidate) >= 40
+                and ("," in candidate or looks_like_uncomma_ingredient_list(candidate))
+                and valid_ingredient_candidate(candidate)
+                and ingredient_candidate_score(candidate) >= 4
+            ):
+                candidates.append(candidate)
+    if candidates:
+        return max(candidates, key=ingredient_candidate_score)
+
     start_pattern = rf"{ingredient_head}.*?{shade_pattern}\s*[:：]?\s*"
     stop_pattern = (
-        r"(?=(?<![/\w])#?\s*(?:0?[1-9]|[a-z]{1,3}\s*\d{1,3})\s+(?-i:[A-Z][A-Za-z]+)|"
+        r"(?=(?<![-/\w])#?\s*(?:\d{2,3}|[a-z]{1,2}\s*\d{1,3})\s+(?-i:[A-Z][A-Za-z]+)|"
         r"\bmore\b|this list of ingredients|actual ingredients|ingredients subject|"
         r"ingredient-list-copy|copy find dupes|find dupes|discover better matches|"
         r"key ingredients|ingredients explained|benefits|"
         r"product information|shipping policy|"
         r"how to use|directions?|caution|warning|made in|$)"
     )
-    candidates = []
     for match in re.finditer(start_pattern + rf"(.{{40,3000}}?){stop_pattern}", text, flags=re.I):
         candidate = normalize_ingredients_text(match.group(1))
         if (
             len(candidate) >= 40
-            and "," in candidate
+            and ("," in candidate or looks_like_uncomma_ingredient_list(candidate))
             and valid_ingredient_candidate(candidate)
             and ingredient_candidate_score(candidate) >= 4
         ):
@@ -1247,12 +1306,12 @@ def valid_ingredient_candidate(ingredients: str) -> bool:
     ]
     if "{{" in ingredients or any(marker in low for marker in bad_markers):
         return False
-    if ingredients.count(",") < 2:
+    if ingredients.count(",") < 2 and not looks_like_uncomma_ingredient_list(ingredients):
         return False
     if ingredient_candidate_score(ingredients) < 4:
         return False
     parts = split_ingredients(ingredients)
-    if len(parts) < 4:
+    if len(parts) < 4 and not looks_like_uncomma_ingredient_list(ingredients):
         return False
     prose_words = [
         "apply",
@@ -1268,6 +1327,8 @@ def valid_ingredient_candidate(ingredients: str) -> bool:
         "shade",
     ]
     prose_hits = sum(1 for word in prose_words if re.search(rf"\b{re.escape(word)}\b", low))
+    if looks_like_uncomma_ingredient_list(ingredients):
+        return prose_hits <= 2
     inci_like = sum(
         1
         for part in parts
@@ -1282,8 +1343,42 @@ def valid_ingredient_candidate(ingredients: str) -> bool:
     return inci_like >= 2 and prose_hits <= max(2, len(parts) // 8)
 
 
+def looks_like_uncomma_ingredient_list(ingredients: str) -> bool:
+    low = ingredients.lower()
+    words = re.findall(r"[a-z][a-z0-9/-]+", low)
+    if len(words) < 18:
+        return False
+    markers = [
+        "silica",
+        "isononyl",
+        "polybutene",
+        "ethylhexyl",
+        "synthetic wax",
+        "propylene glycol",
+        "triethylhexanoin",
+        "diisostearyl",
+        "microcrystalline wax",
+        "titanium dioxide",
+        "polyglyceryl",
+        "candelilla",
+        "dimethicone",
+        "octyldodecanol",
+        "iron oxides",
+        "tocopheryl",
+        "ci ",
+    ]
+    hits = sum(1 for marker in markers if marker in low)
+    return hits >= 5 and bool(re.search(r"\bCI\s*\d{5}\b|\(CI\s*\d{5}\)", ingredients, flags=re.I))
+
+
 def normalize_ingredients_text(ingredients: str) -> str:
     ingredients = trim_non_ingredient_tail(ingredients)
+    ingredients = re.sub(
+        r"^(?:[A-Z][A-Z0-9'/-]*\s+){1,4}(?=(?:Aqua|Water|Silica|Dimethicone|Mica|Talc|"
+        r"Isononyl|Polybutene|Ethylhexyl|Synthetic|Titanium|Iron|CI)\b)",
+        "",
+        ingredients,
+    )
     ingredients = re.sub(r"\bFormula\s+\d+\s*:\s*", ", ", ingredients, flags=re.I)
     ingredients = re.sub(r"\b(GL|PG|VT)\d{1,3}\b\s*", "", ingredients)
     ingredients = re.sub(r"(?<![A-Za-z])(?:C|W|N)\d{1,3}(?![-\w])\s*", "", ingredients)
@@ -1822,15 +1917,33 @@ def shade_key(product: str) -> str:
     return ""
 
 
+def shade_code(product: str) -> str:
+    match = re.search(r"#\s*([a-z]{0,3}\s*\d{1,3})\b", str(product or ""), flags=re.I)
+    if match:
+        return re.sub(r"\s+", "", match.group(1)).lower()
+    clean = searchable_text(product)
+    match = re.search(r"\b(?:shade|color|colour)\s*([a-z]{0,3}\s*\d{1,3})\b", clean)
+    if match:
+        return re.sub(r"\s+", "", match.group(1)).lower()
+    return ""
+
+
 def shade_regex(product: str) -> str:
     key = shade_key(product)
-    if not key:
+    if key:
+        code, _, shade = key.partition("-")
+    else:
+        code = shade_code(product)
+        shade = ""
+    if not code:
         return ""
-    code, _, shade = key.partition("-")
     code_pattern = r"\s*".join(re.escape(ch) for ch in code)
+    if code.isdigit() and len(code) == 2:
+        prefixed_code = r"\s*".join(re.escape(ch) for ch in f"1{code}")
+        code_pattern = rf"(?:{code_pattern}|{prefixed_code})"
     shade_pattern = r"\s+".join(re.escape(part) for part in shade.split("-") if part)
     if not shade_pattern:
-        return ""
+        return rf"#?\s*{code_pattern}\b"
     return rf"#?\s*{code_pattern}\s+{shade_pattern}"
 
 
@@ -2350,6 +2463,13 @@ def candidate_urls(barcode: str, product: str) -> list[str]:
                 "https://www.yesstyle.com/en/into-you-shero-super-matte-lip-cheek-mud-canned-9-colors-342-dust/info.html/pid.1126025802",
                 "https://www.asianbeautywholesale.com/en/into-you-shero-super-matte-lip-cheek-mud-canned-9-colors-342-dust/info.html/pid.1126025802",
                 "https://www.kiseki.ca/intoyou-shero-super-matte-lip-cheek-mud-em10.html",
+            ]
+        )
+    if "3ce" in clean_lookup and "mood" in clean_lookup and "recipe" in clean_lookup and "lip" in clean_lookup:
+        candidates.extend(
+            [
+                "https://www.3cecosmetics.com/all-products/lips/lipstick/3ce-mood-recipe-matte-lip-color",
+                "https://incidecoder.com/products/3ce-mood-recipe-lip-color",
             ]
         )
     if "into" in clean_lookup and "six" in clean_lookup and "blush" in clean_lookup:
