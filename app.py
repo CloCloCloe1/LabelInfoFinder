@@ -235,6 +235,7 @@ PRODUCT_PHRASE_ALIASES = {
     "glow figures": "Glow in the Dark Figure",
     "glow figure": "Glow in the Dark Figure",
     "mini shero lip mud": "Shero Super Matte Lip Cheek Mud",
+    "shero soft matte lip mud": "Shero Super Matte Lip Cheek Mud",
     "shero lip mud": "Shero Super Matte Lip Cheek Mud",
     "shero super matte lip mud": "Shero Super Matte Lip Cheek Mud",
     "super matte lip mud": "Shero Super Matte Lip Cheek Mud",
@@ -979,6 +980,17 @@ def add_audit_columns(ws: openpyxl.worksheet.worksheet.Worksheet) -> dict[str, i
             ws.delete_cols(col)
             headers = normalized_headers(ws)
 
+    source_col = headers.get("source url")
+    if source_col and source_col != ws.max_column:
+        target_col = ws.max_column + 1
+        for row_idx in range(1, ws.max_row + 1):
+            src = ws.cell(row_idx, source_col)
+            dst = ws.cell(row_idx, target_col)
+            dst.value = src.value
+            copy_cell_style(src, dst)
+        ws.delete_cols(source_col)
+        headers = normalized_headers(ws)
+
     if "source url" not in headers:
         col = ws.max_column + 1
         ws.cell(1, col).value = "Source Url"
@@ -1148,12 +1160,7 @@ def ingredients_from_text(text: str, product: str = "") -> str | None:
     candidates = [
         candidate
         for candidate in candidates
-        if "manufacturer's discretion" not in candidate.lower()
-        and "refer to product packaging" not in candidate.lower()
-        and "subject to change" not in candidate.lower()
-        and "{{" not in candidate
-        and "productdata." not in candidate.lower()
-        and "customer reviews" not in candidate.lower()
+        if valid_ingredient_candidate(candidate)
     ]
     if not candidates:
         return None
@@ -1180,7 +1187,12 @@ def ingredients_for_shade(text: str, product: str) -> str | None:
     candidates = []
     for match in re.finditer(start_pattern + rf"(.{{40,3000}}?){stop_pattern}", text, flags=re.I):
         candidate = normalize_ingredients_text(match.group(1))
-        if len(candidate) >= 40 and "," in candidate and ingredient_candidate_score(candidate) >= 4:
+        if (
+            len(candidate) >= 40
+            and "," in candidate
+            and valid_ingredient_candidate(candidate)
+            and ingredient_candidate_score(candidate) >= 4
+        ):
             candidates.append(candidate)
     if candidates:
         return max(candidates, key=ingredient_candidate_score)
@@ -1207,6 +1219,69 @@ def ingredient_candidate_score(ingredients: str) -> int:
     return sum(low.count(hit) for hit in inci_hits) + ingredients.count(",")
 
 
+def valid_ingredient_candidate(ingredients: str) -> bool:
+    low = ingredients.lower()
+    bad_markers = [
+        "manufacturer's discretion",
+        "refer to product packaging",
+        "subject to change",
+        "productdata.",
+        "customer reviews",
+        "how to use",
+        "directions",
+        "direction for use",
+        "apply ",
+        "use a brush",
+        "using a brush",
+        "fingertip",
+        "blend evenly",
+        "product details",
+        "product information",
+        "official service",
+        "shipping",
+        "return policy",
+        "add to cart",
+        "suitable for",
+        "recommended for",
+        "benefits",
+    ]
+    if "{{" in ingredients or any(marker in low for marker in bad_markers):
+        return False
+    if ingredients.count(",") < 2:
+        return False
+    if ingredient_candidate_score(ingredients) < 4:
+        return False
+    parts = split_ingredients(ingredients)
+    if len(parts) < 4:
+        return False
+    prose_words = [
+        "apply",
+        "blend",
+        "skin",
+        "lip",
+        "cheek",
+        "brush",
+        "fingertips",
+        "texture",
+        "finish",
+        "color",
+        "shade",
+    ]
+    prose_hits = sum(1 for word in prose_words if re.search(rf"\b{re.escape(word)}\b", low))
+    inci_like = sum(
+        1
+        for part in parts
+        if re.search(
+            r"\b(?:ci\s*\d{5}|aqua|dimethicone|mica|talc|silica|wax|oil|extract|glycol|"
+            r"glycerin|glycerol|isostearate|stearate|methicone|poly|copolymer|oxide|"
+            r"titanium|iron|phenoxyethanol|ethylhexylglycerin|tocopherol)\b",
+            part,
+            flags=re.I,
+        )
+    )
+    return inci_like >= 2 and prose_hits <= max(2, len(parts) // 8)
+
+
 def normalize_ingredients_text(ingredients: str) -> str:
     ingredients = trim_non_ingredient_tail(ingredients)
     ingredients = re.sub(r"\bFormula\s+\d+\s*:\s*", ", ", ingredients, flags=re.I)
@@ -1223,6 +1298,17 @@ def normalize_ingredients_text(ingredients: str) -> str:
 
 def trim_non_ingredient_tail(ingredients: str) -> str:
     markers = [
+        "please note:",
+        "please note",
+        "note:",
+        "ingredients may differ",
+        "may differ depending on shade",
+        "may vary by shade",
+        "how to use",
+        "directions",
+        "direction for use",
+        "product details",
+        "product information",
         "ingredient-list-copy",
         "copy find dupes",
         "find dupes",
@@ -2809,17 +2895,14 @@ def process_direct_rows(rows: list[dict[str, str]], use_defaults: bool) -> pd.Da
             )
 
         record = {
-            "row": idx,
             "barcode": barcode,
             "product name": product,
-            "source url": result.source_url,
-            "row status": result.status,
         }
         for field in REQUIRED_LABEL_FIELDS:
             record[field] = result.values.get(field, "need to review")
         if result.values.get("restricted ingredients"):
             record["restricted ingredients"] = result.values["restricted ingredients"]
-        record["source notes"] = result.notes
+        record["source url"] = result.source_url
         records.append(record)
     return pd.DataFrame(records)
 
@@ -2847,9 +2930,9 @@ def dataframe_to_workbook(df: pd.DataFrame, sheet_name: str = "Direct Search") -
             cell.alignment = openpyxl.styles.Alignment(wrap_text=True, vertical="top")
     for col_idx, header in enumerate(df.columns, start=1):
         header_text = str(header).lower()
-        if header_text in {"row", "barcode"}:
+        if header_text == "barcode":
             width = 16
-        elif header_text in {"product name", "product name french", "net weight", "row status"}:
+        elif header_text in {"product name", "product name french", "net weight"}:
             width = 28
         elif "source" in header_text or "ingredients" in header_text or "direction" in header_text:
             width = 54

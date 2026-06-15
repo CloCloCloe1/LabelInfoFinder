@@ -39,7 +39,7 @@ Open `http://127.0.0.1:8505`.
 - Search online by barcode or product name when no reference match exists.
 - Preserve workbook sheet names, column order, and formatting as much as possible.
 - Use `need to review` when ingredients, manufacturer, COO, or source data are not confidently found.
-- Add source URL, source notes, and row status columns.
+- Add a final Source Url column for manual review.
 - Check ingredient candidates against Health Canada's Cosmetic Ingredient Hotlist.
 - Export the completed workbook.
 
