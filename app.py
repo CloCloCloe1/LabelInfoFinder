@@ -1203,7 +1203,8 @@ def ingredients_from_text(text: str, product: str = "") -> str | None:
     text = re.sub(r"\s+", " ", text)
     shade_ingredients = ingredients_for_shade(text, product)
     if shade_ingredients:
-        return ingredients_label(shade_ingredients)
+        label = ingredients_label(shade_ingredients)
+        return None if label == "need to review" else label
     stop_words = (
         r"\bmore\b|more information|this list of ingredients|actual ingredients|"
         r"ingredients subject|shipping policy|policies|"
@@ -1232,7 +1233,8 @@ def ingredients_from_text(text: str, product: str = "") -> str | None:
     ingredients = max(candidates, key=ingredient_candidate_score)
     if ingredient_candidate_score(ingredients) < 4:
         return None
-    return ingredients_label(ingredients)
+    label = ingredients_label(ingredients)
+    return None if label == "need to review" else label
 
 
 def ingredients_for_shade(text: str, product: str) -> str | None:
@@ -1325,6 +1327,12 @@ def valid_ingredient_candidate(ingredients: str) -> bool:
         "decode inci",
         "products ingredients decode",
         "follow us on",
+        "we don't have description",
+        "what-it-does",
+        "also-called",
+        "viscosity controlling",
+        "helper ingredient",
+        "read what notable effects",
         "shipping",
         "return policy",
         "add to cart",
@@ -1400,9 +1408,9 @@ def looks_like_uncomma_ingredient_list(ingredients: str) -> bool:
 
 
 def normalize_ingredients_text(ingredients: str) -> str:
-    ingredients = trim_non_ingredient_tail(ingredients)
     ingredients = re.sub(r"^(?:major\s+)?ingredients?\s*(?:[:：-])?\s*", "", ingredients, flags=re.I)
     ingredients = re.sub(r"^ingr[eé]dients?\s*(?:[:：-])?\s*", "", ingredients, flags=re.I)
+    ingredients = trim_non_ingredient_tail(ingredients)
     ingredients = re.sub(
         r"^(?:[A-Z][A-Z0-9'/-]*\s+){1,4}(?=(?:Aqua|Water|Silica|Dimethicone|Mica|Talc|"
         r"Isononyl|Polybutene|Ethylhexyl|Synthetic|Titanium|Iron|CI)\b)",
@@ -1434,13 +1442,33 @@ def trim_non_ingredient_tail(ingredients: str) -> str:
         "direction for use",
         "product details",
         "product information",
+        "description:",
+        "product description",
+        "official service",
         "ingredient-list-copy",
         "copy find dupes",
+        "copy",
         "find dupes",
         "discover better matches",
         "key ingredients",
         "ingredients explained",
         "show all",
+        "show less",
+        "read more",
+        "customer reviews",
+        "review",
+        "rating",
+        "add to cart",
+        "add to bag",
+        "wishlist",
+        "select shade",
+        "select color",
+        "shipping",
+        "return policy",
+        "login register",
+        "decode inci",
+        "products ingredients decode",
+        "follow us on",
         "skin conditioning, solvent",
         "supports skin hydration",
         "shields skin",
@@ -1496,10 +1524,71 @@ def english_ingredients_text(ingredients: str | None) -> str:
     return normalize_ingredients_text(clean)
 
 
+def clean_ingredients_for_output(ingredients: str | None) -> str:
+    clean = english_ingredients_text(ingredients)
+    if not clean:
+        return ""
+    if not valid_ingredient_output(clean):
+        return ""
+    return clean
+
+
+def valid_ingredient_output(ingredients: str) -> bool:
+    low = ingredients.lower()
+    bad_markers = [
+        "major ingredients",
+        "ingredients:",
+        "ingrédients:",
+        "how to use",
+        "direction for use",
+        "product information",
+        "product details",
+        "description:",
+        "customer review",
+        "add to cart",
+        "add to bag",
+        "wishlist",
+        "select shade",
+        "select color",
+        "shipping",
+        "return policy",
+        "login",
+        "register",
+        "decode inci",
+        "copy",
+        "find dupes",
+        "key ingredients",
+        "ingredients explained",
+        "we don't have description",
+        "what-it-does",
+        "also-called",
+        "viscosity controlling",
+        "helper ingredient",
+        "read what notable effects",
+        "benefits",
+        "http://",
+        "https://",
+        ".com",
+    ]
+    if any(marker in low for marker in bad_markers):
+        return False
+    if looks_like_uncomma_ingredient_list(ingredients):
+        return valid_ingredient_candidate(ingredients)
+    parts = split_ingredients(ingredients)
+    if len(parts) < 4:
+        return False
+    if any(len(part) > 140 for part in parts):
+        return False
+    sentence_markers = [" apply ", " use ", " helps ", " leaves ", " provides ", " designed ", " suitable "]
+    if sum(1 for marker in sentence_markers if marker in f" {low} ") >= 2:
+        return False
+    return valid_ingredient_candidate(ingredients)
+
+
 def ingredients_label(ingredients: str | None) -> str:
     if not ingredients:
         return "need to review"
-    english = english_ingredients_text(ingredients)
+    english = clean_ingredients_for_output(ingredients)
     if not english:
         return "need to review"
     return f"{INGREDIENTS_OUTPUT_PREFIX} {english}"
@@ -2742,7 +2831,16 @@ def fetch_source_texts(urls: list[str], product: str, known: dict[str, str]) -> 
     texts: list[tuple[str, str]] = []
     if not urls:
         return texts
-    target_urls = urls[: min(6, len(urls))]
+    first_url = urls[0]
+    first_text = fetch_text(first_url)
+    if len(first_text) > 200:
+        texts.append((first_url, first_text))
+        if enough_product_data(texts, product, known):
+            return texts
+
+    target_urls = [url for url in urls[1: min(6, len(urls))] if url != first_url]
+    if not target_urls:
+        return texts
     max_workers = min(4, len(target_urls))
     executor = ThreadPoolExecutor(max_workers=max_workers)
     try:
